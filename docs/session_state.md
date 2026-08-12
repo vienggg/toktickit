@@ -62,6 +62,7 @@ toktickit/
 ├── docs/
 │   ├── session_state.md
 │   ├── pdf_report_style.md
+│   ├── report_lab01.pdf
 │   ├── report_lab01.docx
 │   └── lab-01/
 │       ├── ai_use.md
