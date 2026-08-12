@@ -46,6 +46,7 @@ To preserve context without wasting output tokens, silently update the following
 
 ## 5. Report Generation Protocol
 * Whenever assigned or asked to create/generate a PDF report, you (and any subagents) MUST read `docs/pdf_report_style.md` first and strictly follow its build method, layout, font, and styling rules.
+* **Document Format (.docx Only):** When generating Word document reports, create ONLY `.docx` files. Do NOT create legacy `.doc` files.
 
 ## 6. Reminders & Workflow Guidelines
 1. **Teammate PR Approval Before Merge:** After opening a PR for each Issue, you MUST request peer review and wait for a teammate to formally click **Approve** on GitHub BEFORE merging into the staging/main branch. *(Note: For Lab 1, comment-based approval was acceptable if already merged; strict formal approval prior to merging will be enforced starting from Lab 2 onwards).*
