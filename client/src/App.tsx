@@ -7,13 +7,18 @@ type UiState = "idle" | "loading" | "success" | "error";
 export default function App() {
   const [state, setState] = useState<UiState>("idle");
   const [categories, setCategories] = useState<Category[]>([]);
-  void categories;
+  const [errorMsg, setErrorMsg] = useState("");
 
   async function handleCheck() {
-    // TODO(Issue 4): set loading, call checkSystem(), then either
-    //   - success: store categories and show Online + the list, or
-    //   - error: show Offline + a useful message.
     setState("loading");
+    try {
+      const result = await checkSystem();
+      setCategories(result.categories);
+      setState("success");
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+      setState("error");
+    }
   }
 
   return (
@@ -26,7 +31,25 @@ export default function App() {
         {state === "loading" ? "Loading…" : "Check System"}
       </button>
 
-      {/* TODO(Issue 4): render loading / success (Online + categories) / error (Offline) states. */}
+      {state === "loading" && <p className="mt-3">Checking system status…</p>}
+
+      {state === "success" && (
+        <div className="mt-3">
+          <span className="badge bg-success me-2">Online</span>
+          <ul className="list-group mt-2">
+            {categories.map((c) => (
+              <li key={c.id} className="list-group-item">{c.name}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {state === "error" && (
+        <div className="mt-3">
+          <span className="badge bg-danger me-2">Offline</span>
+          <p className="text-danger mt-1">{errorMsg}</p>
+        </div>
+      )}
     </div>
   );
 }

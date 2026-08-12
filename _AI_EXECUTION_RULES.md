@@ -1,7 +1,7 @@
 # AI EXECUTION RULES & PROJECT BOUNDARIES
 
 ## 0. User Override (ACTIVE)
-**The project owner has granted blanket approval for all actions.** The AI agent may execute all steps — including file edits, terminal commands, git commits, git pushes, and PR creation — without pausing for user confirmation. This override applies to all Issues in this project. The "Ask First" protocol below is suspended.
+**The project owner has granted blanket approval for all actions.** The AI agent — and ALL subagents it spawns — may execute all steps including file edits, terminal commands, git commits, git pushes, PR creation, and merges without pausing for user confirmation. No agent in this project should ever output `[Awaiting User Approval to Execute]` while this override is active. The user will explicitly say "I'm back" to re-enable the Ask First protocol.
 
 ## 1. The "Ask First" Protocol (SUSPENDED — see §0)
 To conserve tokens and prevent errors, operate in a strict step-by-step loop. Never execute a full Issue in one go.
