@@ -12,6 +12,17 @@ export const app = express();
 app.use(cors());          // already wired: lets the Vite dev server call this API
 app.use(express.json());
 
+app.get("/", (_req: Request, res: Response) => {
+  res.json({
+    message: "Welcome to TokTickIT API",
+    frontend: "http://localhost:5173",
+    endpoints: {
+      health: "/api/health",
+      categories: "/api/categories"
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Issue 2 — API health check
 // Make the test in tests/lab-01/health.test.ts pass.
