@@ -12,13 +12,14 @@
 
 ## Current Branch & Active Issue
 - **Current Branch**: `main`
-- **Active Issue**: Lab 1 Completed (All 4 Issues Done & Merged to `main`)
+- **Active Issue**: Lab 1 Completed & Verified (All 4 Issues Done, Tested, Merged to `main`)
 
-## Kanban Status
-- **Issue 1 (Project Foundation)**: `[Done]`
-- **Issue 2 (API Health Check)**: `[Done]`
-- **Issue 3 (Category Seed)**: `[Done]`
-- **Issue 4 (Category List)**: `[Done]`
+## Kanban Status & Board Options
+- **Project Board**: [TokTickIT Individual Sprints](https://github.com/users/vienggg/projects/1)
+- **Status Columns**: `Backlog`, `Specified`, `Started`, `PR Review`, `Fixing`, `Done`
+- **Cards**:
+  - `PR Review` (1 card): `toktickit #9` (Display the IT request category list)
+  - `Done` (3 cards): `toktickit #6` (Foundation), `toktickit #7` (Health check), `toktickit #8` (Category seed)
 
 ## Project Structure
 ```
@@ -60,22 +61,28 @@ toktickit/
 │           └── categories.test.ts
 ├── docs/
 │   ├── session_state.md
+│   ├── pdf_report_style.md
+│   ├── report_lab01.docx
+│   ├── report_lab01.doc
 │   └── lab-01/
 │       ├── ai_use.md
 │       ├── reviewer.md
 │       └── tests.md
 ├── .gitignore
 ├── README.md
+├── docker-compose.yml
 └── _AI_EXECUTION_RULES.md
 ```
 
-## Architecture & DB State
+## Architecture, Governance & Handoff Readiness
 - **Prisma ORM**: Initialized in `server/prisma/schema.prisma` with `Category` model (`id`, `name`, `createdAt`).
 - **Seed Script**: Idempotent category upsert logic in `server/prisma/seed.ts` for "Account and Access", "Hardware", "Software", "Network".
 - **Backend API**:
   - `GET /api/health` -> `200 OK` `{ status: "ok", service: "TokTickIT API" }`
   - `GET /api/categories` -> `200 OK` `[{ id: 1, name: "Account and Access" }, ...]`
 - **Frontend UI**: React application displaying system status, loading states, Online badge + Category list, and Offline error alert.
+- **Docker Setup**: Full container orchestration (`toktickit-db`, `toktickit-server`, `toktickit-client`).
+- **AI Rules & Tool Switching Handoff**: Defined in `_AI_EXECUTION_RULES.md` (Ask-First protocol, mandatory peer review before merge, markdown edit transparency, and dynamic mode toggles). Any AI assistant can seamlessly take over the project without context loss.
 
 ## Task Checklist
 - [x] Issue 1: Set up project foundation (deps installed, .env configured)
@@ -83,7 +90,9 @@ toktickit/
 - [x] Issue 3: Define `Category` model and idempotent seed script
 - [x] Issue 4: Implement `/api/categories` route, `checkSystem()` API client, React UI, and Vitest component tests
 - [x] PR Workflow: Merged all feature branches to `lab1-staging`, merged release PR #5 to `main`
-- [x] Documentation: Silent documentation updated in `docs/`
+- [x] Peer Review: Reviewed partner PRs on `NinjoMUDA/Dechayut_3414Lab1`
+- [x] Board Configuration: Updated GitHub Project board columns (`Backlog` through `Done`)
+- [x] Documentation & Governance: Updated `README.md`, `ai_use.md`, `reviewer.md`, `tests.md`, `pdf_report_style.md`, `_AI_EXECUTION_RULES.md`, and `session_state.md`
 
 ## Last Executed Command
-`git pull origin main` — Exit status: Pass (0)
+`git push origin main` — Exit status: Pass (0)
