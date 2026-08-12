@@ -27,6 +27,7 @@ By default, operate in a strict step-by-step loop (Standard Ask-First Mode):
 * **DO NOT** start a new Issue until the previous Issue is fully tested, documented, and approved by the user.
 * **DO NOT** overwrite or delete the existing starter scaffold unless explicitly replacing it with required logic.
 * **DO NOT** combine multiple terminal commands if one depends on the success of the other (e.g., do not run tests if the build fails).
+* **DO NOT** create or switch to the next feature branch until the current Pull Request has received formal peer review approval from a teammate on GitHub.
 * **DO NOT** merge any Pull Request into `lab1-staging` (or future staging/main branches) without first securing a formal peer review approval from a teammate on GitHub.
 
 ## 4. Silent Documentation Updates & Markdown Transparency
@@ -49,7 +50,11 @@ To preserve context without wasting output tokens, silently update the following
 * **Document Format (.docx Only):** When generating Word document reports, create ONLY `.docx` files. Do NOT create legacy `.doc` files.
 
 ## 6. Reminders & Workflow Guidelines
-1. **Teammate PR Approval Before Merge:** After opening a PR for each Issue, you MUST request peer review and wait for a teammate to formally click **Approve** on GitHub BEFORE merging into the staging/main branch.
+1. **Mandatory Teammate PR Approval Before Branching & Merging (CRITICAL):**
+   - After opening a PR for each Issue, you MUST submit the PR for peer review on GitHub.
+   - You MUST wait for a teammate to formally click **Approve** on GitHub BEFORE merging into the staging/main branch.
+   - You MUST NOT create or switch to the next feature branch until the current PR has received formal peer review approval.
+
 2. **Late Documentation Branch (`feature/Lab1Doc`):** If all Issues are already completed and merged into `main` but documentation files in `/docs` (`ai_use.md`, `reviewer.md`, `tests.md`) were omitted, create a dedicated branch named `feature/Lab1Doc` to update and merge them. For ongoing work, update `/docs` files progressively before final Issue 4 approval.
 3. **PDF Report Format (LEB2):** When generating the submission PDF, strictly follow the format in the lab sheet and `docs/pdf_report_style.md`. Caption all accompanying images clearly and structure content using headings aligned with the submission checklist.
 4. **GitHub Project & Kanban Board:** Actively manage and update the GitHub Project board, moving Issue cards across Kanban columns (`Backlog`, `Specified`, `Started`, `PR Review`, `Fixing`, `Done`).
