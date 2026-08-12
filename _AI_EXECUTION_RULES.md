@@ -1,11 +1,16 @@
 # AI EXECUTION RULES & PROJECT BOUNDARIES
 
-## 1. The "Ask First" Protocol (CRITICAL)
-To conserve tokens and prevent errors, operate in a strict step-by-step loop. Never execute a full Issue in one go.
+## 1. The "Ask First" Protocol & Dynamic Execution Modes (CRITICAL)
+By default, operate in a strict step-by-step loop (Standard Ask-First Mode):
 1. **Plan:** Briefly list the exact files you will modify and the terminal commands you will run for the *current small step*.
 2. **PAUSE:** Stop generating text entirely. End your response with exactly this phrase: `[Awaiting User Approval to Execute]`.
-3. **Execute:** Only after the user replies with "yes", "go", or similar, make the file edits and run the commands.
+3. **Execute:** Only after the user replies with approval ("yes", "go", "proceed"), make the file edits and run the commands.
 4. **Report:** Briefly state if the step succeeded or failed, then propose the plan for the next step and PAUSE again.
+
+### Mode Switching Protocol:
+* **Autonomous Mode ("Continue Without Asking"):** When the user instructs to "continue without asking", "go autonomous", or similar, temporarily suspend the PAUSE requirement and execute all steps/issues continuously without stopping for individual approvals.
+* **Standard Mode ("Back to Normal"):** When the user instructs "back to normal", "ask me every time", or similar, immediately reactivate the strict Ask-First Protocol (Plan -> PAUSE -> Execute -> Report) for every step.
+
 
 ## 2. Token Efficiency & Anti-Hallucination
 * **Zero Yapping:** No conversational filler, pleasantries, or explanations of basic code syntax. Provide only the required output.
