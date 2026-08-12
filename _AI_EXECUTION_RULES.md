@@ -38,4 +38,12 @@ To preserve context without wasting output tokens, silently update the following
 * `docs/lab-01/reviewer.md` — prepare and update peer review details (reviewer name, PR links, comments given/received, and resolutions) as Pull Requests are managed (adjust folder for future labs).
 
 ## 5. Report Generation Protocol
-* Whenever assigned or asked to create/generate a PDF report, you (and any subagents) MUST read `docs/pdf_report_style.md` first and strictly follow its build method, layout, font, and styling rules.
+* Whenever assigned or asked to create/generate a PDF report, you (and any subagents) MUST read `docs/pdf_report_style.md` first and strictly follow its build method, layout, font, and styling rules.
+
+## 6. Reminders & Workflow Guidelines
+1. **Teammate PR Approval:** After opening a PR for each Issue, ensure a teammate formally clicks **Approve** rather than just leaving a comment. *(Note: For Lab 1, comment-based approval is acceptable if already merged; strict formal approval will be enforced starting from Lab 2).*
+2. **Sequential Issue Execution:** Complete Issues sequentially and wait for teammate approval before advancing to the next step, except for Issue 2 and Issue 3, which can be developed in parallel.
+3. **Late Documentation Branch (`feature/Lab1Doc`):** If all Issues are already completed and merged into `main` but documentation files in `/docs` (`ai_use.md`, `reviewer.md`, `tests.md`) were omitted, create a dedicated branch named `feature/Lab1Doc` to update and merge them. For ongoing work, update `/docs` files progressively before final Issue 4 approval.
+4. **PDF Report Format (LEB2):** When generating the submission PDF, strictly follow the format in the lab sheet and `docs/pdf_report_style.md`. Caption all accompanying images clearly and structure content using headings aligned with the submission checklist.
+5. **GitHub Project & Kanban Board:** Actively manage and update the GitHub Project board, moving Issue cards across Kanban columns (`Backlog`, `Specified`, `Started`, `PR Review`, `Fixing`, `Done`).
+
