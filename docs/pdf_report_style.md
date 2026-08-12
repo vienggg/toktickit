@@ -79,3 +79,20 @@ When asked to generate the report as a **PDF**, build it as HTML/CSS and render 
 * Do NOT add drop shadows, gradients, icons, or decorative graphics.
 * Do NOT switch fonts mid-document — Poppins for all UI text, mono only for code/terminal content.
 * Do NOT omit any required evidence.
+
+---
+
+## 8. Screenshot & Visual Evidence Placement Protocol
+* **Dedicated Screenshot Containers:** For sections requiring visual proof (e.g. Part 1 Git PRs, Part 2 Test execution, Part 4 App Demo & Kanban board), allocate dedicated image containers/placeholders with proper spacing and captions:
+  ```html
+  <div class="screenshot-block">
+    <div class="screenshot-placeholder">[ INSERT SCREENSHOT HERE: Description ]</div>
+    <p class="screenshot-caption">Figure X: Detailed caption describing visual evidence</p>
+  </div>
+  ```
+* **Screenshot Spacing & Styling Rules:**
+  - **Margin & Spacing:** Provide `16px` vertical margins above and below screenshots to prevent text overlap.
+  - **Borders & Frame:** Soft border `1px solid #e4e4e4`, background `#fafafa`, `4px` border radius.
+  - **Captions:** Poppins font, `9pt`, muted gray `#6b6b6b`, centered beneath the image.
+  - **Dimensions:** Max-width `100%`, max-height `160mm` to ensure images fit neatly within page margins without spilling onto next page.
+
