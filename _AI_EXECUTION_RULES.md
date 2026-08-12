@@ -22,8 +22,9 @@ To conserve tokens and prevent errors, operate in a strict step-by-step loop. Ne
 * **DO NOT** start a new Issue until the previous Issue is fully tested, documented, and approved by the user.
 * **DO NOT** overwrite or delete the existing starter scaffold unless explicitly replacing it with required logic.
 * **DO NOT** combine multiple terminal commands if one depends on the success of the other (e.g., do not run tests if the build fails).
+* **DO NOT** merge any Pull Request into `lab1-staging` (or future staging/main branches) without first securing a formal peer review approval from a teammate on GitHub.
 
-## 4. Silent Documentation Updates
+## 4. Silent Documentation Updates & Markdown Transparency
 To preserve context without wasting output tokens, silently update the following files, but **do not print their contents in the chat unless asked**. This is critical so a new AI session can instantly resume work.
 * `docs/session_state.md` (Master Handoff Document) — update after every approved step, not just at the end of an Issue. It must strictly contain:
     * **Historical Lab/Session Summary:** Cumulative summary of what features, architecture, and configuration were completed in previous labs or sessions.
@@ -36,14 +37,16 @@ To preserve context without wasting output tokens, silently update the following
 * `docs/lab-01/ai_use.md` — log key prompts and actions taken (adjust folder for future labs).
 * `docs/lab-01/tests.md` — update the table of Supertest and Vitest test cases as they're written and run (adjust folder for future labs).
 * `docs/lab-01/reviewer.md` — prepare and update peer review details (reviewer name, PR links, comments given/received, and resolutions) as Pull Requests are managed (adjust folder for future labs).
+* **Markdown Edit Transparency:** Whenever proposing to modify any `.md` file, always show the user the exact diff or text content of what will be modified in the proposal step before executing.
 
 ## 5. Report Generation Protocol
 * Whenever assigned or asked to create/generate a PDF report, you (and any subagents) MUST read `docs/pdf_report_style.md` first and strictly follow its build method, layout, font, and styling rules.
 
 ## 6. Reminders & Workflow Guidelines
-1. **Teammate PR Approval:** After opening a PR for each Issue, ensure a teammate formally clicks **Approve** rather than just leaving a comment. *(Note: For Lab 1, comment-based approval is acceptable if already merged; strict formal approval will be enforced starting from Lab 2).*
+1. **Teammate PR Approval Before Merge:** After opening a PR for each Issue, you MUST request peer review and wait for a teammate to formally click **Approve** on GitHub BEFORE merging into the staging/main branch. *(Note: For Lab 1, comment-based approval was acceptable if already merged; strict formal approval prior to merging will be enforced starting from Lab 2 onwards).*
 2. **Sequential Issue Execution:** Complete Issues sequentially and wait for teammate approval before advancing to the next step, except for Issue 2 and Issue 3, which can be developed in parallel.
 3. **Late Documentation Branch (`feature/Lab1Doc`):** If all Issues are already completed and merged into `main` but documentation files in `/docs` (`ai_use.md`, `reviewer.md`, `tests.md`) were omitted, create a dedicated branch named `feature/Lab1Doc` to update and merge them. For ongoing work, update `/docs` files progressively before final Issue 4 approval.
 4. **PDF Report Format (LEB2):** When generating the submission PDF, strictly follow the format in the lab sheet and `docs/pdf_report_style.md`. Caption all accompanying images clearly and structure content using headings aligned with the submission checklist.
 5. **GitHub Project & Kanban Board:** Actively manage and update the GitHub Project board, moving Issue cards across Kanban columns (`Backlog`, `Specified`, `Started`, `PR Review`, `Fixing`, `Done`).
+
 
