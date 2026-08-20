@@ -47,5 +47,42 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
   }
 });
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Lab 2 — Development Requesters
+// GET /api/dev/requesters
+//   -> return active requesters only (isActive: true)
+//   -> on failure, respond 500 with a safe message
+// ---------------------------------------------------------------------------
+app.get("/api/dev/requesters", async (_req: Request, res: Response) => {
+  try {
+    const requesters = await getPrisma().requesterUser.findMany({
+      where: { isActive: true },
+      orderBy: { id: "asc" },
+      select: { id: true, name: true, email: true, isActive: true }
+    });
+    res.json(requesters);
+  } catch (err) {
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch development requesters" } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Lab 2 — Related Systems
+// GET /api/systems
+//   -> return active related systems only (isActive: true)
+// ---------------------------------------------------------------------------
+app.get("/api/systems", async (_req: Request, res: Response) => {
+  try {
+    const systems = await getPrisma().relatedSystem.findMany({
+      where: { isActive: true },
+      orderBy: { id: "asc" },
+      select: { id: true, name: true, description: true, isActive: true }
+    });
+    res.json(systems);
+  } catch (err) {
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch related systems" } });
+  }
+});
 
 export default app;
+
