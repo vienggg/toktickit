@@ -629,3 +629,231 @@ body {
     width: 100%;
   }
 }
+
+/* My Tickets & Filter Bar */
+.my-tickets-container {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.filter-bar-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.filter-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+}
+
+.filter-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.results-count-badge {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.card-surface {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+
+/* Zen Table */
+.table-responsive-wrapper {
+  overflow-x: auto;
+}
+
+.zen-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
+.zen-table th {
+  background-color: #F8FAFC;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable-th:hover {
+  background-color: #EEF2F6;
+  color: var(--color-primary-green);
+}
+
+.zen-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  vertical-align: middle;
+}
+
+.ticket-row {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.ticket-row:hover {
+  background-color: var(--color-pale-green);
+}
+
+.ticket-no-cell {
+  font-family: monospace;
+  color: var(--color-primary-green);
+}
+
+.summary-cell {
+  max-width: 320px;
+}
+
+.summary-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.category-tag {
+  background-color: #F1F5F9;
+  color: #334155;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.attachment-badge {
+  background-color: #EFF6FF;
+  color: #1D4ED8;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.btn-view-ticket {
+  background-color: transparent;
+  color: var(--color-primary-green);
+  border: 1px solid var(--color-primary-green);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-view-ticket:hover {
+  background-color: var(--color-primary-green);
+  color: #FFFFFF;
+}
+
+/* Pagination Bar */
+.pagination-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background-color: #F8FAFC;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.page-btn {
+  background-color: #FFFFFF;
+  border: 1px solid var(--color-border-input);
+  color: var(--color-text-primary);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background-color: var(--color-pale-green);
+  border-color: var(--color-primary-green);
+  color: var(--color-primary-green);
+}
+
+.page-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.page-indicator {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+/* Empty State Card */
+.empty-state-card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  padding: 48px 24px;
+  text-align: center;
+  margin-top: 12px;
+}
+
+.empty-icon {
+  font-size: 3rem;
+  margin-bottom: 12px;
+}
+
+.empty-subtitle {
+  color: var(--color-text-muted);
+  max-width: 480px;
+  margin: 6px auto 0;
+  font-size: 0.95rem;
+}
+
+/* Mobile Filter Responsive */
+@media (max-width: 991px) {
+  .filter-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .zen-table th:nth-child(4),
+  .zen-table td:nth-child(4),
+  .zen-table th:nth-child(5),
+  .zen-table td:nth-child(5),
+  .zen-table th:nth-child(7),
+  .zen-table td:nth-child(7) {
+    display: none;
+  }
+}

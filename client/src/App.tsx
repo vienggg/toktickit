@@ -3,14 +3,27 @@ import { DevRequesterProvider } from "./context/DevRequesterContext";
 import { Navbar } from "./components/Navbar";
 import { DevRequesterModal } from "./components/DevRequesterModal";
 import { CreateTicket } from "./components/CreateTicket";
+import { MyTickets } from "./components/MyTickets";
 import "./index.css";
 
 export function AppContent() {
   const [activeTab, setActiveTab] = useState<"create" | "my-tickets">("create");
+  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
+
+  const handleSelectTicket = (ticketId: number) => {
+    setSelectedTicketId(ticketId);
+    // Detail view will be mounted in Issue 6
+  };
 
   return (
     <div className="app-layout">
-      <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
+      <Navbar
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          setActiveTab(tab);
+          setSelectedTicketId(null);
+        }}
+      />
       <main className="main-content" style={{ maxWidth: 1280, margin: "0 auto", padding: "24px 16px" }}>
         {activeTab === "create" ? (
           <div data-testid="create-ticket-tab">
@@ -30,7 +43,10 @@ export function AppContent() {
             <p style={{ color: "var(--color-text-muted)", marginBottom: 24 }}>
               Track and manage support tickets submitted under your requester account.
             </p>
-            {/* My Tickets list component will be mounted here in Issue 5 */}
+            <MyTickets
+              onSelectTicket={handleSelectTicket}
+              onCreateNewTicket={() => setActiveTab("create")}
+            />
           </div>
         )}
       </main>

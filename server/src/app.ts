@@ -108,6 +108,118 @@ app.get("/api/dev/requesters", async (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/tickets — List & Filter Tickets by Requester
+// ---------------------------------------------------------------------------
+app.get("/api/tickets", async (req: Request, res: Response) => {
+  try {
+    const {
+      requesterId,
+      search,
+      categoryId,
+      relatedSystemId,
+      priority,
+      status,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+      page = "1",
+      pageSize = "10"
+    } = req.query;
+
+    const parsedRequesterId = parseInt(requesterId as string, 10);
+    if (isNaN(parsedRequesterId)) {
+      return res.status(400).json({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "requesterId query parameter is required to view owned tickets."
+        }
+      });
+    }
+
+    const where: any = {
+      requesterId: parsedRequesterId
+    };
+
+    if (search && typeof search === "string" && search.trim() !== "") {
+      const q = search.trim();
+      where.OR = [
+        { ticketNumber: { contains: q, mode: "insensitive" } },
+        { summary: { contains: q, mode: "insensitive" } },
+        { description: { contains: q, mode: "insensitive" } }
+      ];
+    }
+
+    if (categoryId && typeof categoryId === "string" && categoryId !== "ALL") {
+      const catId = parseInt(categoryId, 10);
+      if (!isNaN(catId)) where.categoryId = catId;
+    }
+
+    if (relatedSystemId && typeof relatedSystemId === "string" && relatedSystemId !== "ALL") {
+      const sysId = parseInt(relatedSystemId, 10);
+      if (!isNaN(sysId)) where.relatedSystemId = sysId;
+    }
+
+    if (priority && typeof priority === "string" && priority !== "ALL") {
+      where.requestedPriority = priority as Priority;
+    }
+
+    if (status && typeof status === "string" && status !== "ALL") {
+      where.currentStatus = status;
+    }
+
+    const parsedPage = Math.max(1, parseInt(page as string, 10) || 1);
+    const parsedPageSize = Math.max(1, Math.min(100, parseInt(pageSize as string, 10) || 10));
+    const skip = (parsedPage - 1) * parsedPageSize;
+
+    const validSortFields = ["createdAt", "requestedPriority", "ticketNumber", "summary"];
+    const sortField = validSortFields.includes(sortBy as string) ? (sortBy as string) : "createdAt";
+    const orderDirection = (sortOrder as string)?.toLowerCase() === "asc" ? "asc" : "desc";
+
+    const prisma = getPrisma();
+
+    const [totalCount, tickets] = await Promise.all([
+      prisma.ticket.count({ where }),
+      prisma.ticket.findMany({
+        where,
+        orderBy: { [sortField]: orderDirection },
+        skip,
+        take: parsedPageSize,
+        include: {
+          category: { select: { id: true, name: true } },
+          relatedSystem: { select: { id: true, name: true } },
+          requester: { select: { id: true, name: true, email: true } },
+          _count: {
+            select: {
+              attachments: {
+                where: { isRemoved: false }
+              }
+            }
+          }
+        }
+      })
+    ]);
+
+    const totalPages = Math.ceil(totalCount / parsedPageSize) || 1;
+
+    res.json({
+      data: tickets,
+      pagination: {
+        page: parsedPage,
+        pageSize: parsedPageSize,
+        totalCount,
+        totalPages
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Failed to fetch tickets."
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/tickets — Create Ticket with Attachments
 // ---------------------------------------------------------------------------
 app.post(
@@ -193,7 +305,6 @@ app.post(
       }
 
       if (validationErrors.length > 0) {
-        // Cleanup uploaded files if validation failed
         for (const file of files) {
           if (fs.existsSync(file.path)) {
             fs.unlinkSync(file.path);
@@ -210,7 +321,6 @@ app.post(
 
       const prisma = getPrisma();
 
-      // Verify category, system, and requester exist
       const [category, system, requester] = await Promise.all([
         prisma.category.findUnique({ where: { id: parsedCategoryId } }),
         prisma.relatedSystem.findFirst({ where: { id: parsedSystemId, isActive: true } }),
@@ -227,7 +337,6 @@ app.post(
         return res.status(400).json({ error: { code: "INVALID_REQUESTER", message: "Selected requester is invalid or inactive." } });
       }
 
-      // Generate Ticket Number atomically
       const createdTicket = await prisma.$transaction(async (tx) => {
         const count = await tx.ticket.count();
         const ticketNumber = formatTicketNumber(count + 1);
