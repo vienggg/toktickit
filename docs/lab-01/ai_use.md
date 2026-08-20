@@ -14,7 +14,7 @@
 | 7 | Issue 3: Define Prisma `Category` model & seed script | Updated `schema.prisma` with `Category` model and `seed.ts` with idempotent upserts |
 | 8 | Issue 4: Implement `/api/categories` & React UI | Added `/api/categories` endpoint, `checkSystem()` API fetch, React loading/success/error UI, and Vitest component tests |
 | 9 | PR Workflow, Release PR, and partner peer reviews | Merged PRs #1-4 into `lab1-staging`, merged release PR #5 to `main`, and reviewed partner PRs on `NinjoMUDA/Dechayut_3414Lab1` |
-| 10 | Create PDF report styling and submission specifications | Defined `docs/pdf_report_style.md` to enforce standardized LEB2 submission reports, Poppins typography, single accent color, and 4-part structure |
+| 10 | Create PDF report styling and submission specifications | Defined `shared-tools/md/pdf_report_style.md` to enforce standardized LEB2 submission reports, Poppins typography, single accent color, and 4-part structure |
 
 ## Reflection
 Structuring requests around clear acceptance criteria allowed the AI assistant to produce exact code matches for both Express routes and React component tests. Breaking tasks into issue-focused branches ensured clean Git history and straightforward Pull Requests without breaking existing files.
