@@ -4,6 +4,7 @@ import { Navbar } from "./components/Navbar";
 import { DevRequesterModal } from "./components/DevRequesterModal";
 import { CreateTicket } from "./components/CreateTicket";
 import { MyTickets } from "./components/MyTickets";
+import { TicketDetail } from "./components/TicketDetail";
 import "./index.css";
 
 export function AppContent() {
@@ -12,7 +13,10 @@ export function AppContent() {
 
   const handleSelectTicket = (ticketId: number) => {
     setSelectedTicketId(ticketId);
-    // Detail view will be mounted in Issue 6
+  };
+
+  const handleBackToList = () => {
+    setSelectedTicketId(null);
   };
 
   return (
@@ -25,7 +29,9 @@ export function AppContent() {
         }}
       />
       <main className="main-content" style={{ maxWidth: 1280, margin: "0 auto", padding: "24px 16px" }}>
-        {activeTab === "create" ? (
+        {selectedTicketId !== null ? (
+          <TicketDetail ticketId={selectedTicketId} onBack={handleBackToList} />
+        ) : activeTab === "create" ? (
           <div data-testid="create-ticket-tab">
             <h1 className="h2 mb-3" style={{ color: "var(--color-primary-green)", fontSize: "1.75rem", fontWeight: 700 }}>
               Create New Support Ticket
