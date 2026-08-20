@@ -2,6 +2,7 @@
 import { DevRequesterProvider } from "./context/DevRequesterContext";
 import { Navbar } from "./components/Navbar";
 import { DevRequesterModal } from "./components/DevRequesterModal";
+import { CreateTicket } from "./components/CreateTicket";
 import "./index.css";
 
 export function AppContent() {
@@ -19,7 +20,7 @@ export function AppContent() {
             <p style={{ color: "var(--color-text-muted)", marginBottom: 24 }}>
               Submit an IT support request to the TokTickIT Service Desk.
             </p>
-            {/* Create Ticket form component will be mounted here in Issue 4 */}
+            <CreateTicket />
           </div>
         ) : (
           <div data-testid="my-tickets-tab">

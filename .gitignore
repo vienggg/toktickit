@@ -1,4 +1,4 @@
-# dependencies
+﻿# dependencies
 node_modules/
 # env & secrets
 .env
@@ -9,6 +9,9 @@ dist/
 build/
 # prisma
 server/prisma/*.db
+# uploads
+server/uploads/*
+!server/uploads/.gitkeep
 # logs & OS
 *.log
 .DS_Store
