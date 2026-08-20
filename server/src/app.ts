@@ -220,6 +220,216 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/tickets/:id — Get Ticket Details by ID
+// ---------------------------------------------------------------------------
+app.get("/api/tickets/:id", async (req: Request, res: Response) => {
+  try {
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: { code: "INVALID_ID", message: "Invalid ticket ID." } });
+    }
+
+    const { requesterId } = req.query;
+    const parsedRequesterId = requesterId ? parseInt(requesterId as string, 10) : undefined;
+
+    const prisma = getPrisma();
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: {
+        category: { select: { id: true, name: true } },
+        relatedSystem: { select: { id: true, name: true } },
+        requester: { select: { id: true, name: true, email: true } },
+        attachments: {
+          where: { isRemoved: false },
+          select: {
+            id: true,
+            fileName: true,
+            fileSize: true,
+            mimeType: true,
+            isRemoved: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    }
+
+    if (parsedRequesterId && ticket.requesterId !== parsedRequesterId) {
+      return res.status(403).json({ error: { code: "FORBIDDEN", message: "Access denied to this ticket." } });
+    }
+
+    res.json(ticket);
+  } catch (err: any) {
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch ticket details." } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/tickets/:id — Edit Ticket Details (Only if status === 'New')
+// ---------------------------------------------------------------------------
+app.put("/api/tickets/:id", async (req: Request, res: Response) => {
+  try {
+    const ticketId = parseInt(req.params.id, 10);
+    if (isNaN(ticketId)) {
+      return res.status(400).json({ error: { code: "INVALID_ID", message: "Invalid ticket ID." } });
+    }
+
+    const { summary, description, categoryId, relatedSystemId, requestedPriority, requesterId } = req.body;
+    const prisma = getPrisma();
+
+    const existingTicket = await prisma.ticket.findUnique({
+      where: { id: ticketId }
+    });
+
+    if (!existingTicket) {
+      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    }
+
+    if (requesterId && existingTicket.requesterId !== parseInt(requesterId, 10)) {
+      return res.status(403).json({ error: { code: "FORBIDDEN", message: "You can only edit your own tickets." } });
+    }
+
+    if (existingTicket.currentStatus !== "New") {
+      return res.status(400).json({
+        error: { code: "IMMUTABLE_STATUS", message: "Tickets cannot be modified once they transition beyond 'New' status." }
+      });
+    }
+
+    const validationErrors: { field: string; message: string }[] = [];
+
+    const trimmedSummary = typeof summary === "string" ? summary.trim() : "";
+    if (!trimmedSummary || trimmedSummary.length < 5 || trimmedSummary.length > 200) {
+      validationErrors.push({ field: "summary", message: "Summary must be between 5 and 200 characters." });
+    }
+
+    const trimmedDescription = typeof description === "string" ? description.trim() : "";
+    if (!trimmedDescription || trimmedDescription.length < 10 || trimmedDescription.length > 2000) {
+      validationErrors.push({ field: "description", message: "Description must be between 10 and 2000 characters." });
+    }
+
+    const parsedCatId = parseInt(categoryId, 10);
+    if (isNaN(parsedCatId)) {
+      validationErrors.push({ field: "categoryId", message: "Category is required." });
+    }
+
+    const parsedSysId = parseInt(relatedSystemId, 10);
+    if (isNaN(parsedSysId)) {
+      validationErrors.push({ field: "relatedSystemId", message: "Related system is required." });
+    }
+
+    const validPriorities = ["LOW", "MEDIUM", "HIGH", "URGENT"];
+    if (!requestedPriority || !validPriorities.includes(requestedPriority)) {
+      validationErrors.push({ field: "requestedPriority", message: "Requested priority must be LOW, MEDIUM, HIGH, or URGENT." });
+    }
+
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        error: { code: "VALIDATION_ERROR", message: "Validation failed.", details: validationErrors }
+      });
+    }
+
+    const updatedTicket = await prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        summary: trimmedSummary,
+        description: trimmedDescription,
+        categoryId: parsedCatId,
+        relatedSystemId: parsedSysId,
+        requestedPriority: requestedPriority as Priority
+      },
+      include: {
+        category: { select: { id: true, name: true } },
+        relatedSystem: { select: { id: true, name: true } },
+        requester: { select: { id: true, name: true, email: true } },
+        attachments: {
+          where: { isRemoved: false },
+          select: { id: true, fileName: true, fileSize: true, mimeType: true, isRemoved: true, createdAt: true }
+        }
+      }
+    });
+
+    res.json(updatedTicket);
+  } catch (err: any) {
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update ticket." } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/attachments/:id/download — Download Attachment File
+// ---------------------------------------------------------------------------
+app.get("/api/attachments/:id/download", async (req: Request, res: Response) => {
+  try {
+    const attachmentId = parseInt(req.params.id, 10);
+    if (isNaN(attachmentId)) {
+      return res.status(400).json({ error: { code: "INVALID_ID", message: "Invalid attachment ID." } });
+    }
+
+    const prisma = getPrisma();
+    const attachment = await prisma.attachment.findUnique({
+      where: { id: attachmentId }
+    });
+
+    if (!attachment || attachment.isRemoved) {
+      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Attachment not found or has been removed." } });
+    }
+
+    const filePath = path.join(uploadsDir, attachment.storedFileName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: { code: "FILE_NOT_FOUND", message: "Attachment file missing from storage." } });
+    }
+
+    res.download(filePath, attachment.fileName);
+  } catch (err: any) {
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to download attachment." } });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/attachments/:id — Soft-Delete Attachment (Only if status === 'New')
+// ---------------------------------------------------------------------------
+app.delete("/api/attachments/:id", async (req: Request, res: Response) => {
+  try {
+    const attachmentId = parseInt(req.params.id, 10);
+    if (isNaN(attachmentId)) {
+      return res.status(400).json({ error: { code: "INVALID_ID", message: "Invalid attachment ID." } });
+    }
+
+    const prisma = getPrisma();
+    const attachment = await prisma.attachment.findUnique({
+      where: { id: attachmentId },
+      include: { ticket: true }
+    });
+
+    if (!attachment || attachment.isRemoved) {
+      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Attachment not found or already removed." } });
+    }
+
+    if (attachment.ticket.currentStatus !== "New") {
+      return res.status(400).json({
+        error: { code: "IMMUTABLE_STATUS", message: "Attachments cannot be removed once the ticket is in progress." }
+      });
+    }
+
+    const updatedAttachment = await prisma.attachment.update({
+      where: { id: attachmentId },
+      data: { isRemoved: true }
+    });
+
+    res.json({
+      success: true,
+      message: "Attachment removed successfully.",
+      attachmentId: updatedAttachment.id,
+      isRemoved: updatedAttachment.isRemoved
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to remove attachment." } });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/tickets — Create Ticket with Attachments
 // ---------------------------------------------------------------------------
 app.post(
