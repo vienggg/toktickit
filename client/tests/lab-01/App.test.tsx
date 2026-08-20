@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+﻿import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import App from "../../src/App.js";
-import * as api from "../../src/api.js";
+import App from "../../src/legacy/Lab1App";
+import * as api from "../../src/api";
 
 describe("App", () => {
   it("renders the TokTickIT heading", () => {
