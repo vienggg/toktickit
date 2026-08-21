@@ -1,6 +1,6 @@
-﻿# Lab 2 — Peer Review Record
+# Lab 2 — Peer Review Record
 
-**Author:** Vieng (Student ID: 67070503404, GitHub: @vienggg)  
+**Author:** Garunyapas Danpitakkul (Student ID: 67070503404, GitHub: @vienggg)  
 **Peer Reviewer:** Dechayut (Student ID: 67070503414, GitHub: @NinjoMUDA)  
 **Partner Repository:** [NinjoMUDA/Dechayut_3414Lab1](https://github.com/NinjoMUDA/Dechayut_3414Lab1)  
 
