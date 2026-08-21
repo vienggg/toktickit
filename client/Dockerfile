@@ -10,7 +10,7 @@ COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src/
 
 # Environment variable for Vite build
-ENV VITE_API_URL=http://localhost:3000
+ENV VITE_API_URL=http://server:3000
 
 # Build React app
 RUN npm run build

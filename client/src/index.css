@@ -1,0 +1,78 @@
+:root {
+  --zen-primary: #006B3C;
+  --zen-primary-hover: #00522E;
+  --zen-primary-active: #003D22;
+  --zen-light-tint: #EAF6EF;
+  --zen-neutral-light: #F8FAF9;
+  --zen-neutral-dark: #1E293B;
+  --zen-border: #D0E2D6;
+  --zen-focus-ring: rgba(0, 107, 60, 0.25);
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background-color: var(--zen-neutral-light);
+  color: var(--zen-neutral-dark);
+  min-height: 100vh;
+}
+
+.btn-zen-primary {
+  background-color: var(--zen-primary);
+  border-color: var(--zen-primary);
+  color: #ffffff;
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-zen-primary:hover {
+  background-color: var(--zen-primary-hover);
+  border-color: var(--zen-primary-hover);
+  color: #ffffff;
+}
+
+.btn-zen-primary:active,
+.btn-zen-primary:focus {
+  background-color: var(--zen-primary-active) !important;
+  border-color: var(--zen-primary-active) !important;
+  box-shadow: 0 0 0 0.25rem var(--zen-focus-ring) !important;
+  color: #ffffff;
+}
+
+.btn-zen-outline {
+  border-color: var(--zen-primary);
+  color: var(--zen-primary);
+  background-color: transparent;
+  font-weight: 500;
+}
+
+.btn-zen-outline:hover {
+  background-color: var(--zen-light-tint);
+  border-color: var(--zen-primary);
+  color: var(--zen-primary-hover);
+}
+
+.bg-zen-light {
+  background-color: var(--zen-light-tint) !important;
+}
+
+.text-zen-primary {
+  color: var(--zen-primary) !important;
+}
+
+.border-zen {
+  border-color: var(--zen-border) !important;
+}
+
+.badge-zen {
+  background-color: var(--zen-light-tint);
+  color: var(--zen-primary);
+  border: 1px solid var(--zen-border);
+  font-weight: 600;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--zen-primary);
+  box-shadow: 0 0 0 0.25rem var(--zen-focus-ring);
+}
