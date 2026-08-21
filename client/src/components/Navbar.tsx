@@ -33,6 +33,35 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           TokTickIT <span className="badge bg-white text-zen-primary fs-6 fw-normal">Helpdesk</span>
         </a>
 
+        {/* View Navigation Links */}
+        <div className="d-flex align-items-center gap-2 ms-4">
+          <button
+            type="button"
+            className={`btn btn-sm text-white ${
+              currentView === 'create'
+                ? 'bg-white bg-opacity-25 fw-bold shadow-sm'
+                : 'text-white-50 border-0'
+            }`}
+            onClick={() => setCurrentView('create')}
+            style={{ borderRadius: '0.5rem' }}
+          >
+            ➕ Create Ticket
+          </button>
+
+          <button
+            type="button"
+            className={`btn btn-sm text-white ${
+              currentView === 'list'
+                ? 'bg-white bg-opacity-25 fw-bold shadow-sm'
+                : 'text-white-50 border-0'
+            }`}
+            onClick={() => setCurrentView('list')}
+            style={{ borderRadius: '0.5rem' }}
+          >
+            📋 My Tickets
+          </button>
+        </div>
+
         <div className="d-flex align-items-center gap-3 ms-auto">
           {/* Simulated Requester Context Pill */}
           <div

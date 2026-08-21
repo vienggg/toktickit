@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
+import { Prisma } from "@prisma/client";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -133,6 +134,106 @@ app.get("/api/dev/requesters", async (_req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
+// Lab 2 — Issue 5: My Tickets Search, Filter, Sort, and Pagination (GET /api/tickets)
+// ---------------------------------------------------------------------------
+app.get("/api/tickets", async (req: Request, res: Response) => {
+  try {
+    const { requesterId, search, status, categoryId, priority, sort, page, limit } =
+      req.query;
+
+    if (!requesterId) {
+      return res.status(400).json({ error: "requesterId query parameter is required" });
+    }
+
+    const parsedRequesterId = parseInt(String(requesterId), 10);
+    if (isNaN(parsedRequesterId)) {
+      return res.status(400).json({ error: "requesterId must be a valid integer" });
+    }
+
+    const where: Prisma.TicketWhereInput = {
+      requesterId: parsedRequesterId,
+    };
+
+    // Filter by Status
+    if (status && status !== "All") {
+      where.status = String(status);
+    }
+
+    // Filter by Category
+    if (categoryId && categoryId !== "All") {
+      const parsedCatId = parseInt(String(categoryId), 10);
+      if (!isNaN(parsedCatId)) {
+        where.categoryId = parsedCatId;
+      }
+    }
+
+    // Filter by Priority
+    if (priority && priority !== "All") {
+      where.priority = String(priority);
+    }
+
+    // Search by Ticket Number or Summary (case-insensitive)
+    if (search && typeof search === "string" && search.trim().length > 0) {
+      const query = search.trim();
+      where.OR = [
+        { ticketNumber: { contains: query, mode: "insensitive" } },
+        { summary: { contains: query, mode: "insensitive" } },
+      ];
+    }
+
+    // Sorting
+    let orderBy: Prisma.TicketOrderByWithRelationInput = { createdAt: "desc" };
+    if (sort && typeof sort === "string") {
+      const [field, direction] = sort.split(":");
+      const dir: Prisma.SortOrder = direction === "asc" ? "asc" : "desc";
+      if (field === "createdAt" || field === "updatedAt" || field === "priority" || field === "status") {
+        orderBy = { [field]: dir };
+      }
+    }
+
+    // Pagination
+    const pageNum = Math.max(1, parseInt(String(page || 1), 10) || 1);
+    const take = Math.min(50, Math.max(1, parseInt(String(limit || 10), 10) || 10));
+    const skip = (pageNum - 1) * take;
+
+    const [totalItems, tickets] = await Promise.all([
+      getPrisma().ticket.count({ where }),
+      getPrisma().ticket.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        include: {
+          category: true,
+          relatedSystem: true,
+          requester: true,
+          attachments: {
+            where: { isRemoved: false },
+          },
+        },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(totalItems / take) || 1;
+
+    return res.status(200).json({
+      tickets,
+      pagination: {
+        page: pageNum,
+        limit: take,
+        totalItems,
+        totalPages,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Fetch tickets error:", err);
+    return res.status(500).json({ error: "Failed to fetch tickets" });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Lab 2 — Issue 4: Create Ticket API (POST /api/tickets)
 // ---------------------------------------------------------------------------
 app.post(
@@ -182,7 +283,6 @@ app.post(
         });
       }
 
-      // Verify category and active requester in database
       const category = await getPrisma().category.findUnique({
         where: { id: parsedCategoryId },
       });
