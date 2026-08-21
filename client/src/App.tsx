@@ -1,55 +1,69 @@
-import { useState } from "react";
-import { checkSystem, Category } from "./api.js";
+import React, { useState } from 'react';
+import { DevRequesterProvider, useDevRequester } from './context/DevRequesterContext';
+import { Navbar } from './components/Navbar';
+import { DevRequesterModal } from './components/DevRequesterModal';
 
-// UI states you must handle for Issue 4: idle, loading, success, error.
-type UiState = "idle" | "loading" | "success" | "error";
-
-export default function App() {
-  const [state, setState] = useState<UiState>("idle");
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  async function handleCheck() {
-    setState("loading");
-    try {
-      const result = await checkSystem();
-      setCategories(result.categories);
-      setState("success");
-    } catch (e: unknown) {
-      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
-      setState("error");
-    }
-  }
+function MainContent() {
+  const { currentRequester, setIsModalOpen } = useDevRequester();
+  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail' | 'lab1'>('create');
 
   return (
-    <div className="container py-5" style={{ maxWidth: 640 }}>
-      <h1 className="h3 mb-4">
-        TokTickIT <span className="text-success">IT Service Desk</span>
-      </h1>
+    <div className="min-vh-100 d-flex flex-column" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
+      <Navbar currentView={activeTab} setCurrentView={setActiveTab} />
+      <DevRequesterModal />
 
-      <button className="btn btn-success" onClick={handleCheck} disabled={state === "loading"}>
-        {state === "loading" ? "Loading…" : "Check System"}
-      </button>
-
-      {state === "loading" && <p className="mt-3">Checking system status…</p>}
-
-      {state === "success" && (
-        <div className="mt-3">
-          <span className="badge bg-success me-2">Online</span>
-          <ul className="list-group mt-2">
-            {categories.map((c) => (
-              <li key={c.id} className="list-group-item">{c.name}</li>
-            ))}
-          </ul>
+      <main className="container py-4 flex-grow-1">
+        {/* Development Requester Banner */}
+        <div className="card border-0 shadow-sm mb-4 bg-white" style={{ borderRadius: '0.75rem' }}>
+          <div className="card-body p-3 p-md-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+            <div>
+              <span className="badge badge-zen px-2.5 py-1.5 mb-2">Simulated Requester Context</span>
+              <h4 className="fw-bold mb-1 text-dark">
+                {currentRequester ? currentRequester.name : 'Loading requester...'}
+              </h4>
+              <p className="text-muted small mb-0">
+                Department: <strong>{currentRequester?.department}</strong> | Email: <code>{currentRequester?.email}</code>
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-zen-outline btn-sm d-flex align-items-center gap-2 align-self-start align-self-md-center"
+              onClick={() => setIsModalOpen(true)}
+            >
+              <span>🔄</span> Switch Simulated User
+            </button>
+          </div>
         </div>
-      )}
 
-      {state === "error" && (
-        <div className="mt-3">
-          <span className="badge bg-danger me-2">Offline</span>
-          <p className="text-danger mt-1">{errorMsg}</p>
+        {/* Placeholder for subsequent Issue screens */}
+        <div className="card border-0 shadow-sm p-4 text-center bg-white" style={{ borderRadius: '0.75rem' }}>
+          <h5 className="fw-bold text-zen-primary mb-2">✅ Requester Context Active</h5>
+          <p className="text-muted mb-3" style={{ maxWidth: 540, margin: '0 auto' }}>
+            The development requester session is now initialized for <strong>{currentRequester?.name}</strong>.
+            Upcoming issues will mount the <strong>Create Ticket</strong>, <strong>My Tickets</strong>, and <strong>Ticket Detail</strong> modules here.
+          </p>
+          <div className="d-flex justify-content-center gap-2">
+            <span className="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2">
+              API Context: Ready
+            </span>
+            <span className="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2">
+              Prisma Database: Connected
+            </span>
+          </div>
         </div>
-      )}
+      </main>
+
+      <footer className="py-3 text-center text-muted border-top bg-white small">
+        TokTickIT IT Helpdesk MVP — CPE 334 Software Engineering
+      </footer>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <DevRequesterProvider>
+      <MainContent />
+    </DevRequesterProvider>
   );
 }
