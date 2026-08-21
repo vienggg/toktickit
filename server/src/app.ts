@@ -154,12 +154,10 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
       requesterId: parsedRequesterId,
     };
 
-    // Filter by Status
     if (status && status !== "All") {
       where.status = String(status);
     }
 
-    // Filter by Category
     if (categoryId && categoryId !== "All") {
       const parsedCatId = parseInt(String(categoryId), 10);
       if (!isNaN(parsedCatId)) {
@@ -167,12 +165,10 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
       }
     }
 
-    // Filter by Priority
     if (priority && priority !== "All") {
       where.priority = String(priority);
     }
 
-    // Search by Ticket Number or Summary (case-insensitive)
     if (search && typeof search === "string" && search.trim().length > 0) {
       const query = search.trim();
       where.OR = [
@@ -181,7 +177,6 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
       ];
     }
 
-    // Sorting
     let orderBy: Prisma.TicketOrderByWithRelationInput = { createdAt: "desc" };
     if (sort && typeof sort === "string") {
       const [field, direction] = sort.split(":");
@@ -191,7 +186,6 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
       }
     }
 
-    // Pagination
     const pageNum = Math.max(1, parseInt(String(page || 1), 10) || 1);
     const take = Math.min(50, Math.max(1, parseInt(String(limit || 10), 10) || 10));
     const skip = (pageNum - 1) * take;
@@ -232,6 +226,206 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Failed to fetch tickets" });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Lab 2 — Issue 6: Ticket Detail, Attachment Lifecycle, and Edit Mode
+// ---------------------------------------------------------------------------
+app.get("/api/tickets/:id", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid ticket ID" });
+    }
+
+    const ticket = await getPrisma().ticket.findUnique({
+      where: { id },
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: true,
+        attachments: {
+          where: { isRemoved: false },
+          orderBy: { id: "asc" },
+        },
+      },
+    });
+
+    if (!ticket) {
+      return res.status(404).json({ error: "Ticket not found" });
+    }
+
+    return res.status(200).json(ticket);
+  } catch (err) {
+    console.error("Get ticket detail error:", err);
+    return res.status(500).json({ error: "Failed to fetch ticket detail" });
+  }
+});
+
+app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: "Invalid ticket ID" });
+    }
+
+    const { summary, description, priority, categoryId, relatedSystemId } = req.body;
+
+    const dataToUpdate: Prisma.TicketUpdateInput = {};
+
+    if (summary !== undefined) {
+      if (typeof summary !== "string" || summary.trim().length < 3) {
+        return res.status(400).json({ error: "Summary must be at least 3 characters" });
+      }
+      dataToUpdate.summary = summary.trim();
+    }
+
+    if (description !== undefined) {
+      if (typeof description !== "string" || description.trim().length < 5) {
+        return res.status(400).json({ error: "Description must be at least 5 characters" });
+      }
+      dataToUpdate.description = description.trim();
+    }
+
+    if (priority !== undefined) {
+      if (!["Low", "Medium", "High", "Urgent"].includes(priority)) {
+        return res.status(400).json({ error: "Invalid priority value" });
+      }
+      dataToUpdate.priority = priority;
+    }
+
+    if (categoryId !== undefined) {
+      const parsedCatId = parseInt(String(categoryId), 10);
+      if (isNaN(parsedCatId)) {
+        return res.status(400).json({ error: "Invalid category ID" });
+      }
+      dataToUpdate.category = { connect: { id: parsedCatId } };
+    }
+
+    if (relatedSystemId !== undefined) {
+      if (relatedSystemId === null || relatedSystemId === "") {
+        dataToUpdate.relatedSystem = { disconnect: true };
+      } else {
+        const parsedSysId = parseInt(String(relatedSystemId), 10);
+        if (!isNaN(parsedSysId)) {
+          dataToUpdate.relatedSystem = { connect: { id: parsedSysId } };
+        }
+      }
+    }
+
+    const updatedTicket = await getPrisma().ticket.update({
+      where: { id },
+      data: dataToUpdate,
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: true,
+        attachments: {
+          where: { isRemoved: false },
+        },
+      },
+    });
+
+    return res.status(200).json(updatedTicket);
+  } catch (err) {
+    console.error("Update ticket error:", err);
+    return res.status(500).json({ error: "Failed to update ticket" });
+  }
+});
+
+// Add attachment to existing ticket
+app.post(
+  "/api/tickets/:id/attachments",
+  upload.array("attachments", 5),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+
+      const ticket = await getPrisma().ticket.findUnique({
+        where: { id },
+        include: { attachments: { where: { isRemoved: false } } },
+      });
+
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+
+      const files = (req.files as Express.Multer.File[]) || [];
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No files provided" });
+      }
+
+      if (ticket.attachments.length + files.length > 5) {
+        return res
+          .status(400)
+          .json({ error: "Maximum 5 active attachments allowed per ticket." });
+      }
+
+      const createdAttachments = await Promise.all(
+        files.map((file) =>
+          getPrisma().attachment.create({
+            data: {
+              ticketId: id,
+              fileName: file.originalname,
+              fileUrl: `/uploads/${file.filename}`,
+              fileSize: file.size,
+              mimeType: file.mimetype,
+              isRemoved: false,
+            },
+          })
+        )
+      );
+
+      return res.status(201).json(createdAttachments);
+    } catch (err) {
+      console.error("Upload attachment error:", err);
+      return res.status(500).json({ error: "Failed to upload attachments" });
+    }
+  }
+);
+
+// Soft-remove attachment
+app.delete(
+  "/api/tickets/:id/attachments/:attachmentId",
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const attachmentId = parseInt(req.params.attachmentId, 10);
+      const reason = req.body?.reason || "Removed by user";
+
+      if (isNaN(id) || isNaN(attachmentId)) {
+        return res.status(400).json({ error: "Invalid parameters" });
+      }
+
+      const attachment = await getPrisma().attachment.findFirst({
+        where: { id: attachmentId, ticketId: id },
+      });
+
+      if (!attachment) {
+        return res.status(404).json({ error: "Attachment not found" });
+      }
+
+      const updated = await getPrisma().attachment.update({
+        where: { id: attachmentId },
+        data: {
+          isRemoved: true,
+          removedReason: reason,
+          removedAt: new Date(),
+        },
+      });
+
+      return res.status(200).json({
+        message: "Attachment soft-removed successfully",
+        attachment: updated,
+      });
+    } catch (err) {
+      console.error("Delete attachment error:", err);
+      return res.status(500).json({ error: "Failed to remove attachment" });
+    }
+  }
+);
 
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 4: Create Ticket API (POST /api/tickets)

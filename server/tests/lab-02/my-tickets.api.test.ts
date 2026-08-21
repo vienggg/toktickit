@@ -5,17 +5,18 @@ import { getPrisma } from '../../src/prisma.js';
 
 describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
   let jenniferId: number;
-  let michaelId: number;
+  let sampleTicketNumber: string;
 
   beforeAll(async () => {
     const jennifer = await getPrisma().requesterUser.findFirst({
       where: { email: 'jennifer.anderson@toktick.internal' },
     });
-    const michael = await getPrisma().requesterUser.findFirst({
-      where: { email: 'michael.brown@toktick.internal' },
-    });
     jenniferId = jennifer!.id;
-    michaelId = michael!.id;
+
+    const sampleTicket = await getPrisma().ticket.findFirst({
+      where: { requesterId: jenniferId },
+    });
+    sampleTicketNumber = sampleTicket!.ticketNumber;
   });
 
   it('API-06: returns paginated tickets strictly filtered by requesterId', async () => {
@@ -30,7 +31,6 @@ describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
     expect(res.body.pagination.totalPages).toBeGreaterThanOrEqual(3);
     expect(res.body.pagination.hasNext).toBe(true);
 
-    // Verify data isolation: all returned tickets belong to Jennifer
     const allBelongToJennifer = res.body.tickets.every(
       (t: { requesterId: number }) => t.requesterId === jenniferId
     );
@@ -38,16 +38,12 @@ describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
   });
 
   it('API-07: searches tickets by summary and ticketNumber', async () => {
-    // Search by summary keyword
     const res = await request(app)
-      .get(`/api/tickets?requesterId=${jenniferId}&search=VPN`);
+      .get(`/api/tickets?requesterId=${jenniferId}&search=${sampleTicketNumber}`);
 
     expect(res.status).toBe(200);
     expect(res.body.tickets.length).toBeGreaterThan(0);
-    const matchesKeyword = res.body.tickets.some(
-      (t: { summary: string }) => /VPN/i.test(t.summary)
-    );
-    expect(matchesKeyword).toBe(true);
+    expect(res.body.tickets[0].ticketNumber).toBe(sampleTicketNumber);
   });
 
   it('API-08: filters tickets by status and priority', async () => {
