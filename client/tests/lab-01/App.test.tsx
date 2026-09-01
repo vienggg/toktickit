@@ -1,53 +1,39 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import React from "react";
-import App from "../../src/App";
-import * as api from "../../src/api";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import App from "../../src/App.js";
+import * as api from "../../src/api.js";
 
-describe("App & Lab 1 API Client", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("renders the TokTickIT brand and navigation", () => {
+describe("App", () => {
+  it("renders the TokTickIT heading", () => {
     render(<App />);
-    const brandElements = screen.getAllByText(/TokTickIT/i);
-    expect(brandElements.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/TokTickIT/i)).toBeInTheDocument();
   });
 
-  it("checkSystem returns online and categories on success", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: RequestInfo | URL) => {
-      const urlStr = String(url);
-      if (urlStr.includes("/api/health")) {
-        return { ok: true, json: async () => ({ status: "ok" }) } as Response;
-      }
-      if (urlStr.includes("/api/categories")) {
-        return {
-          ok: true,
-          json: async () => [
-            { id: 1, name: "Account and Access" },
-            { id: 2, name: "Hardware" },
-            { id: 3, name: "Software" },
-            { id: 4, name: "Network" },
-          ],
-        } as Response;
-      }
-      return { ok: false, status: 404 } as Response;
+  it("shows Online and the seeded categories on success", async () => {
+    vi.spyOn(api, "checkSystem").mockResolvedValue({
+      online: true,
+      categories: [
+        { id: 1, name: "Account and Access" },
+        { id: 2, name: "Hardware" },
+        { id: 3, name: "Software" },
+        { id: 4, name: "Network" },
+      ],
     });
-
-    const result = await api.checkSystem();
-    expect(result.online).toBe(true);
-    expect(result.categories).toHaveLength(4);
-    expect(result.categories[0].name).toBe("Account and Access");
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /check system/i }));
+    await waitFor(() => expect(screen.getByText("Online")).toBeInTheDocument());
+    expect(screen.getByText("Account and Access")).toBeInTheDocument();
+    expect(screen.getByText("Hardware")).toBeInTheDocument();
+    expect(screen.getByText("Software")).toBeInTheDocument();
+    expect(screen.getByText("Network")).toBeInTheDocument();
   });
 
-  it("checkSystem throws an error when health check fails", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-    } as Response);
-
-    await expect(api.checkSystem()).rejects.toThrow("Health check failed");
+  it("shows an Offline error message when the API is unavailable", async () => {
+    vi.spyOn(api, "checkSystem").mockRejectedValue(new Error("Network error"));
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: /check system/i }));
+    await waitFor(() => expect(screen.getByText("Offline")).toBeInTheDocument());
+    expect(screen.getByText("Network error")).toBeInTheDocument();
   });
 });
-

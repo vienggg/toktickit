@@ -8,9 +8,8 @@ RUN npm ci
 
 COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src/
-COPY tests ./tests/
 
-# Environment variable for Vite build (Browser communicates with backend on localhost)
+# Environment variable for Vite build
 ENV VITE_API_URL=http://localhost:3000
 
 # Build React app

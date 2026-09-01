@@ -6,17 +6,6 @@ import { PrismaClient } from "@prisma/client";
 let client: PrismaClient | null = null;
 
 export function getPrisma(): PrismaClient {
-  if (!client) {
-    const dbUrl =
-      process.env.DATABASE_URL ||
-      "postgresql://toktickit:toktickit@172.26.27.122:5432/toktickit?schema=public";
-    client = new PrismaClient({
-      datasources: {
-        db: {
-          url: dbUrl,
-        },
-      },
-    });
-  }
+  if (!client) client = new PrismaClient();
   return client;
 }

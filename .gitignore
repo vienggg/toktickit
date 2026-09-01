@@ -12,7 +12,3 @@ server/prisma/*.db
 # logs & OS
 *.log
 .DS_Store
-
-# uploads
-server/uploads/*
-!server/uploads/.gitkeep
