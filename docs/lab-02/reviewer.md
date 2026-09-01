@@ -69,11 +69,13 @@
 
 | PR # | Title | Feature Branch | Review Link | Verdict |
 |---|---|---|---|:---:|
-| **#18** | DB Schema Extension & Seed Data | `feature/database-schema-and-seed` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/18) | Approved |
-| **#19** | Dev Requester Context & Login | `feature/dev-requester-context` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/19) | Approved |
-| **#21** | Create Ticket Screen UI | `feature/create-ticket-and-zen-ui` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/21) | Approved |
-| **#22** | My Tickets Screen & Filters | `feature/my-tickets-search-and-filters` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/22) | Approved |
-| **#23** | Ticket Detail & Attachments | `feature/ticket-detail-attachments-and-edit` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/23) | Approved |
+| **#20** | Docs: Sprint 2 Engineering Contracts & Test Plan | `docs/lab2-spec-and-test-plan` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/20) | Approved |
+| **#21** | Feat: DB Schema Extension & Seed Data | `feature/database-schema-and-seed` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/21) | Approved |
+| **#22** | Feat: Dev Requester Context & Login Modal | `feature/dev-requester-context` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/22) | Approved |
+| **#23** | Feat: Create Ticket Screen & Zen Green Form UI | `feature/create-ticket-and-zen-ui` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/23) | Approved |
+| **#24** | Feat: My Tickets Screen & Multi-Criteria Filters | `feature/my-tickets-search-and-filters` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/24) | Approved |
+| **#25** | Feat: Ticket Detail, Attachments & Edit Mode | `feature/ticket-detail-attachments-and-edit` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/25) | Approved |
+| **#26** | Docs: Sprint 2 Release Integration & Report | `docs/lab2-sprint2-release-and-report` | [Review Link](https://github.com/NinjoMUDA/Dechayut_3414Lab1/pull/26) | Approved |
 
 ### My Review Feedback Given to Partner:
-> *"Verified database seed data, multi-user isolation on My Tickets, attachment format rejection, and soft-removal modal behavior. Code looks clean and tests pass."*
+> *"Verified database seed data, multi-user isolation on My Tickets, attachment format rejection, and soft-removal modal behavior. Code looks clean and all automated test suites pass cleanly on partner staging."*
