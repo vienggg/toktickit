@@ -30,7 +30,7 @@ describe('Development Requester Context & Simulated Login (UI-01)', () => {
   });
 
   it('UI-01: fetches active users, defaults to Jennifer Anderson, and allows context switching', async () => {
-    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
       ok: true,
       json: async () => mockRequesters,
     } as Response);

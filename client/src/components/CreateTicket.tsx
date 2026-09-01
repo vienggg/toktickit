@@ -51,12 +51,13 @@ export const CreateTicket: React.FC = () => {
   const [createdTicket, setCreatedTicket] = useState<CreatedTicketResult | null>(null);
 
   useEffect(() => {
+    const controller = new AbortController();
     async function loadReferenceData() {
       setIsLoadingRefData(true);
       try {
         const [catRes, sysRes] = await Promise.all([
-          fetch('/api/categories'),
-          fetch('/api/systems'),
+          fetch('/api/categories', { signal: controller.signal }),
+          fetch('/api/systems', { signal: controller.signal }),
         ]);
 
         if (catRes.ok) {
@@ -69,14 +70,17 @@ export const CreateTicket: React.FC = () => {
           const sys: RelatedSystem[] = await sysRes.json();
           setSystems(sys);
         }
-      } catch (err) {
-        console.error('Failed to load reference data:', err);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('Failed to load reference data:', err);
+        }
       } finally {
         setIsLoadingRefData(false);
       }
     }
 
     loadReferenceData();
+    return () => controller.abort();
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -293,6 +297,8 @@ export const CreateTicket: React.FC = () => {
                   id="ticket-category"
                   className={`form-select ${fieldErrors.categoryId ? 'is-invalid' : ''}`}
                   value={categoryId}
+                  aria-invalid={!!fieldErrors.categoryId}
+                  aria-describedby={fieldErrors.categoryId ? 'ticket-category-error' : undefined}
                   onChange={(e) => {
                     setCategoryId(e.target.value);
                     if (fieldErrors.categoryId) {
@@ -309,7 +315,7 @@ export const CreateTicket: React.FC = () => {
                   ))}
                 </select>
                 {fieldErrors.categoryId && (
-                  <div className="invalid-feedback d-block">{fieldErrors.categoryId}</div>
+                  <div id="ticket-category-error" className="invalid-feedback d-block">{fieldErrors.categoryId}</div>
                 )}
               </div>
 
@@ -367,6 +373,8 @@ export const CreateTicket: React.FC = () => {
                   placeholder="e.g. ERP Core Reconciliation Error on Q2 Close"
                   maxLength={200}
                   value={summary}
+                  aria-invalid={!!fieldErrors.summary}
+                  aria-describedby={fieldErrors.summary ? 'ticket-summary-error' : undefined}
                   onChange={(e) => {
                     setSummary(e.target.value);
                     if (fieldErrors.summary) {
@@ -375,7 +383,7 @@ export const CreateTicket: React.FC = () => {
                   }}
                 />
                 {fieldErrors.summary && (
-                  <div className="invalid-feedback d-block">{fieldErrors.summary}</div>
+                  <div id="ticket-summary-error" className="invalid-feedback d-block">{fieldErrors.summary}</div>
                 )}
               </div>
             </div>
@@ -391,6 +399,8 @@ export const CreateTicket: React.FC = () => {
                 className={`form-control ${fieldErrors.description ? 'is-invalid' : ''}`}
                 placeholder="Provide detailed information about the issue, error messages, and reproduction steps..."
                 value={description}
+                aria-invalid={!!fieldErrors.description}
+                aria-describedby={fieldErrors.description ? 'ticket-description-error' : undefined}
                 onChange={(e) => {
                   setDescription(e.target.value);
                   if (fieldErrors.description) {
@@ -399,7 +409,7 @@ export const CreateTicket: React.FC = () => {
                 }}
               ></textarea>
               {fieldErrors.description && (
-                <div className="invalid-feedback d-block">{fieldErrors.description}</div>
+                <div id="ticket-description-error" className="invalid-feedback d-block">{fieldErrors.description}</div>
               )}
             </div>
 

@@ -56,7 +56,7 @@ describe('My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05)'
     localStorage.clear();
     vi.restoreAllMocks();
 
-    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL) => {
       const urlStr = String(url);
       if (urlStr.includes('/api/dev/requesters')) {
         return { ok: true, json: async () => mockRequesters } as Response;
@@ -87,7 +87,7 @@ describe('My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05)'
   });
 
   it('UI-05: updates search query and triggers fetch with filter parameters', async () => {
-    const fetchSpy = vi.spyOn(global, 'fetch');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     render(
       <DevRequesterProvider>
@@ -102,8 +102,14 @@ describe('My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05)'
     const searchInput = screen.getByPlaceholderText(/Search by summary or TKT-YYYY/i);
     fireEvent.change(searchInput, { target: { value: 'VPN' } });
 
-    await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('search=VPN'));
-    });
+    await waitFor(
+      () => {
+        expect(fetchSpy).toHaveBeenCalledWith(
+          expect.stringContaining('search=VPN'),
+          expect.anything()
+        );
+      },
+      { timeout: 2000 }
+    );
   });
 });

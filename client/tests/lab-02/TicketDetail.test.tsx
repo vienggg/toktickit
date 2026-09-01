@@ -41,7 +41,7 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
     localStorage.clear();
     vi.restoreAllMocks();
 
-    vi.spyOn(global, 'fetch').mockImplementation(async (url, options) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL, options?: RequestInit) => {
       const urlStr = String(url);
       if (urlStr.includes('/api/dev/requesters')) {
         return { ok: true, json: async () => mockRequesters } as Response;
