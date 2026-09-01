@@ -7,7 +7,7 @@ import { MyTickets } from './components/MyTickets';
 import { TicketDetail } from './components/TicketDetail';
 
 function MainContent() {
-  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail' | 'lab1'>('list');
+  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
 
   const handleSelectTicket = (id: number) => {

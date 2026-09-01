@@ -70,47 +70,55 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   const [removalReason, setRemovalReason] = useState<string>('');
   const [targetAttachmentToRemove, setTargetAttachmentToRemove] = useState<Attachment | null>(null);
 
-  const fetchTicketDetail = useCallback(async () => {
+  const fetchTicketDetail = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/tickets/${ticketId}`);
+      const res = await fetch(`/api/tickets/${ticketId}`, { signal });
       if (!res.ok) {
         throw new Error(`Ticket not found or error loading (HTTP ${res.status})`);
       }
       const data: TicketDetailData = await res.json();
       setTicket(data);
 
-      // Populate edit fields
-      setEditSummary(data.summary);
-      setEditDescription(data.description);
-      setEditPriority(data.priority);
-      setEditCategoryId(String(data.categoryId));
-      setEditRelatedSystemId(data.relatedSystemId ? String(data.relatedSystemId) : '');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load ticket details');
+      // Populate edit fields only if not currently preserving user draft
+      if (!preserveDrafts) {
+        setEditSummary(data.summary);
+        setEditDescription(data.description);
+        setEditPriority(data.priority);
+        setEditCategoryId(String(data.categoryId));
+        setEditRelatedSystemId(data.relatedSystemId ? String(data.relatedSystemId) : '');
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        setError(err.message || 'Failed to load ticket details');
+      }
     } finally {
       setIsLoading(false);
     }
   }, [ticketId]);
 
   useEffect(() => {
-    fetchTicketDetail();
+    const controller = new AbortController();
+    fetchTicketDetail(false, controller.signal);
 
     // Load category and system lists
     async function loadRef() {
       try {
         const [catRes, sysRes] = await Promise.all([
-          fetch('/api/categories'),
-          fetch('/api/systems'),
+          fetch('/api/categories', { signal: controller.signal }),
+          fetch('/api/systems', { signal: controller.signal }),
         ]);
         if (catRes.ok) setCategories(await catRes.json());
         if (sysRes.ok) setSystems(await sysRes.json());
-      } catch (err) {
-        console.error('Failed to load options:', err);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('Failed to load options:', err);
+        }
       }
     }
     loadRef();
+    return () => controller.abort();
   }, [fetchTicketDetail]);
 
   const handleStartEdit = () => {
@@ -246,7 +254,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
 
       setTargetAttachmentToRemove(null);
       setRemovalReason('');
-      await fetchTicketDetail();
+      await fetchTicketDetail(isEditing);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : 'Removal failed');
     }

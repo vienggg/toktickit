@@ -273,15 +273,15 @@ app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
     const dataToUpdate: Prisma.TicketUpdateInput = {};
 
     if (summary !== undefined) {
-      if (typeof summary !== "string" || summary.trim().length < 3) {
-        return res.status(400).json({ error: "Summary must be at least 3 characters" });
+      if (typeof summary !== "string" || summary.trim().length < 3 || summary.trim().length > 200) {
+        return res.status(400).json({ error: "Summary must be between 3 and 200 characters" });
       }
       dataToUpdate.summary = summary.trim();
     }
 
     if (description !== undefined) {
-      if (typeof description !== "string" || description.trim().length < 5) {
-        return res.status(400).json({ error: "Description must be at least 5 characters" });
+      if (typeof description !== "string" || description.trim().length < 5 || description.trim().length > 10000) {
+        return res.status(400).json({ error: "Description must be between 5 and 10,000 characters" });
       }
       dataToUpdate.description = description.trim();
     }
@@ -440,17 +440,17 @@ app.post(
 
       const errors: { field: string; message: string }[] = [];
 
-      if (!summary || typeof summary !== "string" || summary.trim().length < 3) {
+      if (!summary || typeof summary !== "string" || summary.trim().length < 3 || summary.trim().length > 200) {
         errors.push({
           field: "summary",
-          message: "Summary is required and must be at least 3 characters.",
+          message: "Summary is required and must be between 3 and 200 characters.",
         });
       }
 
-      if (!description || typeof description !== "string" || description.trim().length < 5) {
+      if (!description || typeof description !== "string" || description.trim().length < 5 || description.trim().length > 10000) {
         errors.push({
           field: "description",
-          message: "Description is required and must be at least 5 characters.",
+          message: "Description is required and must be between 5 and 10,000 characters.",
         });
       }
 

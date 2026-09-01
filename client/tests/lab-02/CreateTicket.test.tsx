@@ -22,7 +22,7 @@ describe('Create Ticket Screen & Zen Green Form UI (UI-02, UI-03)', () => {
     localStorage.clear();
     vi.restoreAllMocks();
 
-    vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL) => {
       const urlStr = String(url);
       if (urlStr.includes('/api/dev/requesters')) {
         return { ok: true, json: async () => mockRequesters } as Response;

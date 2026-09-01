@@ -61,6 +61,11 @@ model Ticket {
   relatedSystem RelatedSystem? @relation(fields: [relatedSystemId], references: [id])
   requester     RequesterUser  @relation(fields: [requesterId], references: [id])
   attachments   Attachment[]
+
+  @@index([requesterId])
+  @@index([status])
+  @@index([categoryId])
+  @@index([createdAt])
 }
 
 model Attachment {

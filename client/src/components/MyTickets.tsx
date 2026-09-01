@@ -55,6 +55,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
 
   // Filter States
   const [search, setSearch] = useState<string>('');
+  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [status, setStatus] = useState<string>('All');
   const [categoryId, setCategoryId] = useState<string>('All');
   const [priority, setPriority] = useState<string>('All');
@@ -62,23 +63,35 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
   const [page, setPage] = useState<number>(1);
   const [limit, setLimit] = useState<number>(10);
 
+  // Debounce search query by 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
   // Load Categories for dropdown
   useEffect(() => {
+    const controller = new AbortController();
     async function loadCategories() {
       try {
-        const res = await fetch('/api/categories');
+        const res = await fetch('/api/categories', { signal: controller.signal });
         if (res.ok) {
           const data: CategoryOption[] = await res.json();
           setCategories(data);
         }
-      } catch (err) {
-        console.error('Failed to load categories:', err);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('Failed to load categories:', err);
+        }
       }
     }
     loadCategories();
+    return () => controller.abort();
   }, []);
 
-  const fetchTickets = useCallback(async () => {
+  const fetchTickets = useCallback(async (signal?: AbortSignal) => {
     if (!currentRequester) return;
 
     setIsLoading(true);
@@ -92,12 +105,12 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
         sort,
       });
 
-      if (search.trim()) params.append('search', search.trim());
+      if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
       if (status !== 'All') params.append('status', status);
       if (categoryId !== 'All') params.append('categoryId', categoryId);
       if (priority !== 'All') params.append('priority', priority);
 
-      const res = await fetch(`/api/tickets?${params.toString()}`);
+      const res = await fetch(`/api/tickets?${params.toString()}`, { signal });
       if (!res.ok) {
         throw new Error(`Failed to fetch tickets (HTTP ${res.status})`);
       }
@@ -112,19 +125,24 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
         hasNext: false,
         hasPrev: false,
       });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        setError(err.message || 'Unknown error');
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [currentRequester, page, limit, search, status, categoryId, priority, sort]);
+  }, [currentRequester, page, limit, debouncedSearch, status, categoryId, priority, sort]);
 
   useEffect(() => {
-    fetchTickets();
+    const controller = new AbortController();
+    fetchTickets(controller.signal);
+    return () => controller.abort();
   }, [fetchTickets]);
 
   const handleResetFilters = () => {
     setSearch('');
+    setDebouncedSearch('');
     setStatus('All');
     setCategoryId('All');
     setPriority('All');
@@ -409,7 +427,16 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
                     <tr
                       key={t.id}
                       style={{ cursor: onSelectTicket ? 'pointer' : 'default' }}
+                      tabIndex={onSelectTicket ? 0 : undefined}
+                      role={onSelectTicket ? 'button' : undefined}
+                      aria-label={`View details for ticket ${t.ticketNumber}`}
                       onClick={() => onSelectTicket && onSelectTicket(t.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectTicket?.(t.id);
+                        }
+                      }}
                     >
                       <td className="ps-4 font-monospace fw-semibold text-zen-primary">
                         {t.ticketNumber}

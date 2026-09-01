@@ -2,8 +2,8 @@ import React from 'react';
 import { useDevRequester } from '../context/DevRequesterContext';
 
 interface NavbarProps {
-  currentView: 'create' | 'list' | 'detail' | 'lab1';
-  setCurrentView: (view: 'create' | 'list' | 'detail' | 'lab1') => void;
+  currentView: 'create' | 'list' | 'detail';
+  setCurrentView: (view: 'create' | 'list' | 'detail') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) => {
