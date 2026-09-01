@@ -8,6 +8,8 @@ interface Attachment {
   fileSize: number;
   mimeType: string;
   isRemoved: boolean;
+  removedReason?: string | null;
+  removedAt?: string | null;
   uploadedAt: string;
 }
 
@@ -25,6 +27,7 @@ interface TicketDetailData {
   requesterId: number;
   requester: { id: number; name: string; email: string; department: string };
   attachments: Attachment[];
+  removedAttachments?: Attachment[];
   createdAt: string;
   updatedAt: string;
 }
@@ -616,6 +619,51 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {ticket.removedAttachments && ticket.removedAttachments.length > 0 && (
+              <div className="mt-4 pt-3 border-top">
+                <div className="d-flex align-items-center gap-2 mb-2">
+                  <span className="badge bg-secondary">Audit Trail</span>
+                  <h6 className="text-muted small fw-bold mb-0">
+                    Soft-Removed Attachments ({ticket.removedAttachments.length})
+                  </h6>
+                </div>
+                <div className="list-group gap-2">
+                  {ticket.removedAttachments.map((att) => (
+                    <div
+                      key={att.id}
+                      className="list-group-item bg-light d-flex justify-content-between align-items-center p-3 rounded border"
+                    >
+                      <div className="d-flex align-items-center gap-3">
+                        <span className="fs-4 text-muted">📄</span>
+                        <div>
+                          <div className="d-flex align-items-center gap-2">
+                            <span className="badge bg-danger">Soft-Removed</span>
+                            <span className="text-decoration-line-through text-muted fw-semibold">
+                              {att.fileName}
+                            </span>
+                            <span className="text-muted small">({formatBytes(att.fileSize)})</span>
+                          </div>
+                          {att.removedReason && (
+                            <div className="text-muted small mt-1">
+                              <em>Reason: "{att.removedReason}"</em>
+                            </div>
+                          )}
+                          {att.removedAt && (
+                            <div className="text-muted small">
+                              Removed on {formatDate(att.removedAt)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <span className="badge bg-light text-muted border px-2 py-1 small">
+                        Download Blocked (410 Gone)
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

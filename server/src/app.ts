@@ -254,7 +254,12 @@ app.get("/api/tickets/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Ticket not found" });
     }
 
-    return res.status(200).json(ticket);
+    const removedAttachments = await getPrisma().attachment.findMany({
+      where: { ticketId: id, isRemoved: true },
+      orderBy: { id: "asc" },
+    });
+
+    return res.status(200).json({ ...ticket, removedAttachments });
   } catch (err) {
     console.error("Get ticket detail error:", err);
     return res.status(500).json({ error: "Failed to fetch ticket detail" });
