@@ -17,6 +17,7 @@
 | **#39** | Feat: Create Ticket API, Validation, and Zen Green Form UI | `feature/create-ticket-and-zen-ui` | `lab2-staging` | [Approved & Merged](https://github.com/vienggg/toktickit/pull/39) |
 | **#40** | Feat: My Tickets Screen with Search, Filter, Sort and Pagination | `feature/my-tickets-search-and-filters` | `lab2-staging` | [Approved & Merged](https://github.com/vienggg/toktickit/pull/40) |
 | **#41** | Feat: Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit | `feature/ticket-detail-attachments-and-edit` | `lab2-staging` | [Approved & Merged](https://github.com/vienggg/toktickit/pull/41) |
+| **#45** | Docs: Sprint 2 Verification, Test Matrix, and Release Polish | `docs/lab2-sprint2-release-and-report` | `lab2-staging` | [Approved & Merged](https://github.com/vienggg/toktickit/pull/45) |
 
 ### Substantive Review Comments Received & Responses:
 
