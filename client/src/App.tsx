@@ -1,54 +1,55 @@
-import React, { useState } from 'react';
-import { DevRequesterProvider } from './context/DevRequesterContext';
-import { Navbar } from './components/Navbar';
-import { DevRequesterModal } from './components/DevRequesterModal';
-import { CreateTicket } from './components/CreateTicket';
-import { MyTickets } from './components/MyTickets';
-import { TicketDetail } from './components/TicketDetail';
+import { useState } from "react";
+import { checkSystem, Category } from "./api.js";
 
-function MainContent() {
-  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
-  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
-
-  const handleSelectTicket = (id: number) => {
-    setSelectedTicketId(id);
-    setActiveTab('detail');
-  };
-
-  return (
-    <div className="min-vh-100 d-flex flex-column" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
-      <Navbar currentView={activeTab} setCurrentView={setActiveTab} />
-      <DevRequesterModal />
-
-      <main className="container py-4 flex-grow-1">
-        {activeTab === 'create' && <CreateTicket />}
-
-        {activeTab === 'list' && (
-          <MyTickets
-            onSelectTicket={handleSelectTicket}
-            onNavigateToCreate={() => setActiveTab('create')}
-          />
-        )}
-
-        {activeTab === 'detail' && selectedTicketId && (
-          <TicketDetail
-            ticketId={selectedTicketId}
-            onBack={() => setActiveTab('list')}
-          />
-        )}
-      </main>
-
-      <footer className="py-3 text-center text-muted border-top bg-white small">
-        TokTickIT IT Helpdesk MVP — CPE 334 Software Engineering
-      </footer>
-    </div>
-  );
-}
+// UI states you must handle for Issue 4: idle, loading, success, error.
+type UiState = "idle" | "loading" | "success" | "error";
 
 export default function App() {
+  const [state, setState] = useState<UiState>("idle");
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  async function handleCheck() {
+    setState("loading");
+    try {
+      const result = await checkSystem();
+      setCategories(result.categories);
+      setState("success");
+    } catch (e: unknown) {
+      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+      setState("error");
+    }
+  }
+
   return (
-    <DevRequesterProvider>
-      <MainContent />
-    </DevRequesterProvider>
+    <div className="container py-5" style={{ maxWidth: 640 }}>
+      <h1 className="h3 mb-4">
+        TokTickIT <span className="text-success">IT Service Desk</span>
+      </h1>
+
+      <button className="btn btn-success" onClick={handleCheck} disabled={state === "loading"}>
+        {state === "loading" ? "Loading…" : "Check System"}
+      </button>
+
+      {state === "loading" && <p className="mt-3">Checking system status…</p>}
+
+      {state === "success" && (
+        <div className="mt-3">
+          <span className="badge bg-success me-2">Online</span>
+          <ul className="list-group mt-2">
+            {categories.map((c) => (
+              <li key={c.id} className="list-group-item">{c.name}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {state === "error" && (
+        <div className="mt-3">
+          <span className="badge bg-danger me-2">Offline</span>
+          <p className="text-danger mt-1">{errorMsg}</p>
+        </div>
+      )}
+    </div>
   );
 }
