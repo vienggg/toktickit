@@ -254,6 +254,16 @@ app.get("/api/tickets/:id", async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Ticket not found" });
     }
 
+    const requesterId = req.query.requesterId ? parseInt(String(req.query.requesterId), 10) : undefined;
+    if (requesterId !== undefined && !isNaN(requesterId) && ticket.requesterId !== requesterId) {
+      return res.status(403).json({
+        error: "Forbidden: You do not have permission to view this ticket.",
+        code: "FORBIDDEN_TICKET_ACCESS",
+        ticketId: id,
+        requestedBy: requesterId,
+      });
+    }
+
     const removedAttachments = await getPrisma().attachment.findMany({
       where: { ticketId: id, isRemoved: true },
       orderBy: { id: "asc" },
