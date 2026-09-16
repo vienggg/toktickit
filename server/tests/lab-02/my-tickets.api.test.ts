@@ -8,7 +8,7 @@ describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
   let sampleTicketNumber: string;
 
   beforeAll(async () => {
-    const jennifer = await getPrisma().requesterUser.findFirst({
+    const jennifer = await getPrisma().user.findFirst({
       where: { email: 'jennifer.anderson@toktick.internal' },
     });
     jenniferId = jennifer!.id;

@@ -7,7 +7,11 @@ services:
       POSTGRES_PASSWORD: toktickit
       POSTGRES_DB: toktickit
     ports:
-      - "5432:5432"
+      # Published as 5433 on the host — 5432 collides with a native Postgres
+      # instance already running elsewhere on this machine (e.g. inside WSL).
+      # Internal docker-network traffic (the `server` service below, which
+      # talks to `db:5432`) is unaffected; this only changes host-side access.
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

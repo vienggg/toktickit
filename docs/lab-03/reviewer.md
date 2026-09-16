@@ -14,12 +14,20 @@
 
 | PR # | Title | Feature Branch | Target Branch | Status & Verdict |
 |---|---|---|---|:---:|
-| — | Sprint 3 infrastructure: auth/router/testing deps, Playwright harness, Prisma migration baseline | `chore/lab3-phase0-infra` | `lab3-staging` | Pending |
-| — | Docs: Sprint 3 engineering contract (specification, api-spec, ui-spec, tests) | `docs/lab3-spec-and-test-plan` | `lab3-staging` | Pending |
+| [#61](https://github.com/vienggg/toktickit/pull/61) | chore(lab3): Sprint 3 infrastructure setup | `chore/lab3-phase0-infra` | `lab3-staging` | Approved & Merged |
+| [#62](https://github.com/vienggg/toktickit/pull/62) | docs(lab3): Sprint 3 engineering contract | `docs/lab3-spec-and-test-plan` | `lab3-staging` | Approved & Merged |
+| — | I-2: Data model, migration, and seed | `feature/lab3-user-model-and-migration` | `lab3-staging` | Pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
 predicted outcomes.)*
+
+**Note on reviewer identity:** PRs #61 and #62 were reviewed and merged by the
+GitHub account **@projectnewy**, not @NinjoMUDA as named at the top of this
+document. This is recorded here factually and should be confirmed/reconciled
+before final submission — Part 1 grades "rendered reviewer.md with reviewer
+identity," so whichever account is doing the actual reviewing needs to match
+what this document says.
 
 ---
 
