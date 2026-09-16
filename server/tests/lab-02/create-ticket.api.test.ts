@@ -9,7 +9,7 @@ describe('POST /api/tickets (API-03, API-04, API-05)', () => {
 
   beforeAll(async () => {
     const category = await getPrisma().category.findFirst();
-    const requester = await getPrisma().requesterUser.findFirst({ where: { isActive: true } });
+    const requester = await getPrisma().user.findFirst({ where: { isActive: true } });
     validCategoryId = category!.id;
     validRequesterId = requester!.id;
   });

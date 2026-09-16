@@ -102,7 +102,26 @@ from `specification.md`; the mapping is finalized in I-11 alongside the final
 
 ## Regression Baseline (recorded before any Lab 3 migration)
 
-Captured 2026-09-16 against the pre-Lab-3 database, backed up to
+**Correction (2026-09-16):** the count below of Ticket 18 / Attachment 4,
+originally captured during Phase 0, was taken against the wrong database. This
+machine runs two independent PostgreSQL servers that both listen on port 5432
+— a Docker container (`toktickit-db`, reachable only via `docker exec`) and a
+real Postgres 16 instance inside a WSL Ubuntu distro (reachable via
+`localhost:5432` from any host-side tool, including every `npx prisma`
+command, `npm run dev`, and this session's own Node scripts, because Windows
+routes `localhost` to the more specific `127.0.0.1`-bound listener). The
+Docker container turned out to be a stale, unused artifact from initial
+`docker-compose` setup (volume created 2026-08-12, ticket numbers randomly
+generated, never touched since); the WSL instance is the real one — its
+ticket numbers follow the sequential `TKT-2026-0001XX` scheme from the Lab 2
+hardening fix, with timestamps through 2026-09-02 matching the actual session
+history. The Phase 0 backup and this baseline table have been redone against
+the WSL (real) database. `docker-compose.yml`'s `db` service now publishes
+port 5433 instead of 5432 to prevent this ambiguity recurring; its internal
+Docker-network traffic (`db:5432`, used by the `server` container) is
+unaffected either way.
+
+Captured 2026-09-16 against the corrected pre-Lab-3 database, backed up to
 `artifacts/lab-03/db-backup-pre-lab3.sql`:
 
 | Table | Row Count |
@@ -110,9 +129,12 @@ Captured 2026-09-16 against the pre-Lab-3 database, backed up to
 | Category | 4 |
 | RequesterUser | 5 |
 | RelatedSystem | 7 |
-| Ticket | 18 |
-| Attachment | 4 |
+| Ticket | 15 |
+| Attachment | 5 |
 
 REGR-01 asserts these counts are unchanged after the full `0_init` →
 `4_add_comments_and_notes` migration sequence, and that every `Ticket.requesterId`
 still resolves to the same `User` row it referenced as a `RequesterUser`.
+Verified manually during I-2 (all 15 tickets and 5 attachments preserved,
+zero NULLs introduced by the enum conversion) and asserted automatically by
+`server/tests/lab-03/migration-regression.api.test.ts`.

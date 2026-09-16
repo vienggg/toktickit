@@ -20,6 +20,7 @@ adversarial review of the sprint plan before implementation began).
 | 5 | `no skip this part, i will have my other friend to do pull request too we have talked together already` | Skipped the "confirm reviewer availability" step since it had already been agreed outside the tool; kept the rest of Phase 0 unchanged. |
 | 6 | `from now i want you to do everything and only ask for my approval when it do with github like issue and pull request` | Narrowed the approval gate: local work (files, commands, migrations, Docker, tests) proceeds without asking; GitHub-visible actions (PRs, issues, remote branch deletions) still pause for explicit approval. |
 | 7 | `continue` / `go on` / `ok` | Used to advance through Phase 0 execution steps (branch creation, dependency installs, Playwright setup, database backup, migration baseline) one confirmed step at a time. |
+| 8 | `you decide and do everything you only ask me when it deal with gh` | Directed the assistant to execute I-2 (data model, migration, seed) end-to-end without per-step confirmation, reserving approval only for GitHub-visible actions. During execution the assistant discovered and independently resolved a real infrastructure bug: two Postgres servers both listening on port 5432 (a stale Docker container and the real WSL-hosted database), which had caused the Phase 0 backup and every `prisma migrate` bookkeeping call to silently target the wrong database. |
 
 *(A GitHub personal access token was pasted into chat during this sprint. It
 was not used for any operation — entering API keys/tokens is a hard rule the
@@ -58,3 +59,15 @@ hygiene branch (I dropped it — a judgment call about scope, not something the
 assistant should decide), and the choice to narrow the approval gate to
 GitHub-only actions once I trusted the plan enough not to need a checkpoint on
 every local command.
+
+**On I-2 specifically:** loosening the approval gate had an immediate payoff —
+the assistant caught something a step-by-step confirmation flow likely
+wouldn't have surfaced as clearly: a `db pull` and a `docker exec` query
+disagreeing about the same "toktickit" database's data. Rather than proceeding
+on the assumption that whichever database it had already backed up was
+correct, it treated the discrepancy as a stop condition, gathered evidence
+(process ownership of the port, ticket-numbering patterns, timestamps) to
+determine which database was real, then redid the Phase 0 backup and the
+already-applied migration bookkeeping against the correct one before
+continuing. That is exactly the kind of infrastructure assumption I would want
+checked rather than silently trusted.

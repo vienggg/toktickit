@@ -6,7 +6,55 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
-import { Prisma } from "@prisma/client";
+import { Prisma, TicketStatus, Priority } from "@prisma/client";
+
+// Lab 3 introduced TicketStatus/Priority as native Prisma enums (uppercase,
+// underscore-separated). The Lab 2 client still sends legacy casing
+// ("New", "In Progress", "High") until it is reworked in I-4; these
+// normalizers keep both old and new client requests working against the
+// new enum columns without changing observable Lab 2 behavior.
+function normalizeStatus(value: string): TicketStatus | undefined {
+  const key = value.trim().toUpperCase().replace(/\s+/g, "_");
+  return (Object.values(TicketStatus) as string[]).includes(key) ? (key as TicketStatus) : undefined;
+}
+function normalizePriority(value: string): Priority | undefined {
+  const key = value.trim().toUpperCase();
+  return (Object.values(Priority) as string[]).includes(key) ? (key as Priority) : undefined;
+}
+
+// Reverse mapping back to the exact casing Lab 2 established, for the 4
+// status/priority values that already existed pre-Lab-3. The 4 new
+// statuses (OPEN, WAITING_FOR_REQUESTER, REOPENED, CANCELLED) have no
+// legacy equivalent and pass through unchanged — no Lab 2 contract ever
+// covered them, and this Requester-facing endpoint is fully reworked in I-4.
+const LEGACY_STATUS: Partial<Record<TicketStatus, string>> = {
+  NEW: "New",
+  IN_PROGRESS: "In_Progress",
+  RESOLVED: "Resolved",
+  CLOSED: "Closed",
+};
+const LEGACY_PRIORITY: Record<Priority, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  URGENT: "Urgent",
+};
+
+// The Prisma field is `requestedPriority` (Lab 3), but the Lab 2 client and
+// its existing tests still read `priority` (Title-Case) and `status`
+// (Title-Case/underscore) from API responses. This keeps the wire contract
+// unchanged until I-4 reworks the client/tests together; I-2's scope is
+// the data model only.
+function serializeTicket<T extends { requestedPriority: Priority; status: TicketStatus }>(
+  ticket: T
+): Omit<T, "requestedPriority" | "status"> & { priority: string; status: string } {
+  const { requestedPriority, status, ...rest } = ticket;
+  return {
+    ...rest,
+    priority: LEGACY_PRIORITY[requestedPriority],
+    status: LEGACY_STATUS[status] ?? status,
+  };
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -115,7 +163,7 @@ app.get("/api/systems", async (_req: Request, res: Response) => {
 
 app.get("/api/dev/requesters", async (_req: Request, res: Response) => {
   try {
-    const activeRequesters = await getPrisma().requesterUser.findMany({
+    const activeRequesters = await getPrisma().user.findMany({
       where: { isActive: true },
       orderBy: { id: "asc" },
       select: {
@@ -155,7 +203,8 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     };
 
     if (status && status !== "All") {
-      where.status = String(status);
+      const normalized = normalizeStatus(String(status));
+      if (normalized) where.status = normalized;
     }
 
     if (categoryId && categoryId !== "All") {
@@ -166,7 +215,8 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     }
 
     if (priority && priority !== "All") {
-      where.priority = String(priority);
+      const normalized = normalizePriority(String(priority));
+      if (normalized) where.requestedPriority = normalized;
     }
 
     if (search && typeof search === "string" && search.trim().length > 0) {
@@ -181,8 +231,12 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     if (sort && typeof sort === "string") {
       const [field, direction] = sort.split(":");
       const dir: Prisma.SortOrder = direction === "asc" ? "asc" : "desc";
-      if (field === "createdAt" || field === "updatedAt" || field === "priority" || field === "status") {
+      if (field === "createdAt" || field === "updatedAt" || field === "status") {
         orderBy = { [field]: dir };
+      } else if (field === "priority") {
+        // Client-facing sort key stays "priority"; the underlying Prisma
+        // field is "requestedPriority" (D-09).
+        orderBy = { requestedPriority: dir };
       }
     }
 
@@ -211,7 +265,7 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     const totalPages = Math.ceil(totalItems / take) || 1;
 
     return res.status(200).json({
-      tickets,
+      tickets: tickets.map(serializeTicket),
       pagination: {
         page: pageNum,
         limit: take,
@@ -269,7 +323,7 @@ app.get("/api/tickets/:id", async (req: Request, res: Response) => {
       orderBy: { id: "asc" },
     });
 
-    return res.status(200).json({ ...ticket, removedAttachments });
+    return res.status(200).json({ ...serializeTicket(ticket), removedAttachments });
   } catch (err) {
     console.error("Get ticket detail error:", err);
     return res.status(500).json({ error: "Failed to fetch ticket detail" });
@@ -302,10 +356,11 @@ app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
     }
 
     if (priority !== undefined) {
-      if (!["Low", "Medium", "High", "Urgent"].includes(priority)) {
+      const normalized = normalizePriority(String(priority));
+      if (!normalized) {
         return res.status(400).json({ error: "Invalid priority value" });
       }
-      dataToUpdate.priority = priority;
+      dataToUpdate.requestedPriority = normalized;
     }
 
     if (categoryId !== undefined) {
@@ -340,7 +395,7 @@ app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
       },
     });
 
-    return res.status(200).json(updatedTicket);
+    return res.status(200).json(serializeTicket(updatedTicket));
   } catch (err) {
     console.error("Update ticket error:", err);
     return res.status(500).json({ error: "Failed to update ticket" });
@@ -502,7 +557,7 @@ app.post(
         });
       }
 
-      const requester = await getPrisma().requesterUser.findUnique({
+      const requester = await getPrisma().user.findUnique({
         where: { id: parsedRequesterId },
       });
       if (!requester || !requester.isActive) {
@@ -513,9 +568,7 @@ app.post(
       }
 
       const parsedSystemId = relatedSystemId ? parseInt(relatedSystemId, 10) : null;
-      const validPriority = ["Low", "Medium", "High", "Urgent"].includes(priority)
-        ? priority
-        : "Medium";
+      const validPriority = normalizePriority(String(priority)) ?? Priority.MEDIUM;
 
       const ticketNumber = generateTicketNumber();
 
@@ -533,8 +586,8 @@ app.post(
           ticketNumber,
           summary: summary.trim(),
           description: description.trim(),
-          priority: validPriority,
-          status: "New",
+          requestedPriority: validPriority,
+          status: TicketStatus.NEW,
           categoryId: parsedCategoryId,
           relatedSystemId: parsedSystemId && !isNaN(parsedSystemId) ? parsedSystemId : null,
           requesterId: parsedRequesterId,
@@ -550,7 +603,7 @@ app.post(
         },
       });
 
-      return res.status(201).json(newTicket);
+      return res.status(201).json(serializeTicket(newTicket));
     } catch (err) {
       console.error("Create ticket error:", err);
       return res.status(500).json({ error: "Failed to create ticket" });
