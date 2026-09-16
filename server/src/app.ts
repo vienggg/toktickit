@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import { hashPassword, verifyPassword, meetsPasswordPolicy } from "./utils/password.js";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
@@ -7,6 +9,12 @@ import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
 import { Prisma, TicketStatus, Priority } from "@prisma/client";
+import {
+  requireAuth,
+  requirePasswordChanged,
+  issueSessionCookie,
+  clearSessionCookie,
+} from "./auth.js";
 
 // Lab 3 introduced TicketStatus/Priority as native Prisma enums (uppercase,
 // underscore-separated). The Lab 2 client still sends legacy casing
@@ -111,8 +119,18 @@ const upload = multer({
 
 export const app = express();
 
-app.use(cors());
+// credentials: true is required for the httpOnly session cookie (D-01) to
+// be sent/received cross-origin; wildcard "*" origin is not permitted by
+// browsers when credentials are enabled, so the client origin is read from
+// an env var with a sane local-dev default.
+app.use(
+  cors({
+    origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+    credentials: true,
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
 app.use("/uploads", express.static(uploadsDir));
 
 app.get("/", (_req: Request, res: Response) => {
@@ -134,6 +152,132 @@ app.get("/", (_req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 app.get("/api/health", (_req: Request, res: Response) => {
   res.status(200).json({ status: "ok", service: "TokTickIT API" });
+});
+
+// ---------------------------------------------------------------------------
+// Lab 3 — Authentication (I-3)
+// ---------------------------------------------------------------------------
+
+// BR-06: an invalid email/password combination always returns this exact
+// generic message, whether or not the email exists — never leak which
+// field was wrong or whether the account exists.
+const INVALID_CREDENTIALS_RESPONSE = {
+  error: { code: "INVALID_CREDENTIALS", message: "Invalid email or password." },
+};
+
+function safeUser(user: { id: number; name: string; email: string; role: string; department: string; mustChangePassword: boolean }) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    department: user.department,
+    mustChangePassword: user.mustChangePassword,
+  };
+}
+
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body ?? {};
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Email and password are required." } });
+    }
+
+    // BR-01, BR-06: email comparison is case-insensitive; a non-existent
+    // email and a wrong password produce the identical response.
+    const user = await getPrisma().user.findFirst({
+      where: { email: { equals: email.trim(), mode: "insensitive" } },
+    });
+    if (!user) {
+      return res.status(401).json(INVALID_CREDENTIALS_RESPONSE);
+    }
+
+    const passwordMatches = verifyPassword(password, user.passwordHash);
+    if (!passwordMatches) {
+      return res.status(401).json(INVALID_CREDENTIALS_RESPONSE);
+    }
+
+    // BR-07: only reveal deactivation *after* the password has already
+    // proven the account exists — never before, and never for a wrong
+    // password against an inactive account (that case still returns the
+    // generic 401 above, indistinguishable from a wrong password on an
+    // active account).
+    if (!user.isActive) {
+      return res.status(403).json({ error: { code: "ACCOUNT_INACTIVE", message: "This account has been deactivated." } });
+    }
+
+    await getPrisma().user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    issueSessionCookie(res, user.id);
+    return res.status(200).json({ user: safeUser(user) });
+  } catch (err) {
+    return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to log in right now." } });
+  }
+});
+
+// BR-08: idempotent — clearing an already-cleared/absent cookie still
+// succeeds. requireAuth is deliberately NOT applied here: logging out
+// while already logged out (or with an expired token) must not itself
+// require a valid session.
+app.post("/api/auth/logout", (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  return res.status(204).send();
+});
+
+app.get("/api/auth/me", requireAuth, (req: Request, res: Response) => {
+  // req.authUser is guaranteed by requireAuth; requirePasswordChanged is
+  // deliberately not applied to this route (it's on the allowlist) so the
+  // client can always learn its own mustChangePassword state.
+  return res.status(200).json({ user: req.authUser });
+});
+
+app.post("/api/auth/change-password", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+    if (
+      typeof currentPassword !== "string" ||
+      typeof newPassword !== "string" ||
+      typeof confirmPassword !== "string"
+    ) {
+      return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "All password fields are required." } });
+    }
+
+    // BR-09: at least 8 characters, at least one letter and one digit.
+    const meetsPolicy = newPassword.length >= 8 && /[A-Za-z]/.test(newPassword) && /\d/.test(newPassword);
+    if (!meetsPolicy) {
+      return res.status(400).json({
+        error: { code: "WEAK_PASSWORD", message: "Password must be at least 8 characters and include a letter and a digit." },
+      });
+    }
+    // BR-11: confirmation must match exactly.
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: { code: "PASSWORD_MISMATCH", message: "New password and confirmation do not match." } });
+    }
+
+    const user = await getPrisma().user.findUnique({ where: { id: req.authUser!.id } });
+    if (!user) {
+      return res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Login required." } });
+    }
+
+    if (!verifyPassword(currentPassword, user.passwordHash)) {
+      return res.status(400).json({ error: { code: "INVALID_CURRENT_PASSWORD", message: "Current password is incorrect." } });
+    }
+    // BR-10: on a forced change, the new password must differ from the
+    // initial one (a user cannot "change" their password to itself and
+    // remain stuck in the mustChangePassword state).
+    if (verifyPassword(newPassword, user.passwordHash)) {
+      return res.status(400).json({ error: { code: "PASSWORD_UNCHANGED", message: "New password must be different from your current password." } });
+    }
+
+    const newHash = hashPassword(newPassword);
+    const updated = await getPrisma().user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash, mustChangePassword: false },
+    });
+
+    return res.status(200).json({ user: safeUser(updated) });
+  } catch (err) {
+    return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to change password right now." } });
+  }
 });
 
 app.get("/api/categories", async (_req: Request, res: Response) => {
