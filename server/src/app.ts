@@ -139,9 +139,9 @@ app.get("/", (_req: Request, res: Response) => {
     frontend: "http://localhost:5173",
     endpoints: {
       health: "/api/health",
+      auth: "/api/auth/login",
       categories: "/api/categories",
       systems: "/api/systems",
-      devRequesters: "/api/dev/requesters",
       tickets: "/api/tickets",
     },
   });
@@ -280,7 +280,12 @@ app.post("/api/auth/change-password", requireAuth, async (req: Request, res: Res
   }
 });
 
-app.get("/api/categories", async (_req: Request, res: Response) => {
+// Note: GET /api/dev/requesters (the Development Requester selector) is
+// removed in I-4 — real authentication replaces it entirely (per the
+// handout §8.2 and specification.md scope). Its test file is removed
+// alongside it.
+
+app.get("/api/categories", requireAuth, requirePasswordChanged, async (_req: Request, res: Response) => {
   try {
     const categories = await getPrisma().category.findMany({
       orderBy: { id: "asc" },
@@ -292,7 +297,7 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/systems", async (_req: Request, res: Response) => {
+app.get("/api/systems", requireAuth, requirePasswordChanged, async (_req: Request, res: Response) => {
   try {
     const systems = await getPrisma().relatedSystem.findMany({
       where: { isActive: true },
@@ -305,45 +310,17 @@ app.get("/api/systems", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/dev/requesters", async (_req: Request, res: Response) => {
-  try {
-    const activeRequesters = await getPrisma().user.findMany({
-      where: { isActive: true },
-      orderBy: { id: "asc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        department: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
-    res.status(200).json(activeRequesters);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch development requesters" });
-  }
-});
-
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 5: My Tickets Search, Filter, Sort, and Pagination (GET /api/tickets)
+// Lab 3 (I-4): ownership comes from the authenticated session (BR-03), never
+// from a client-supplied requesterId.
 // ---------------------------------------------------------------------------
-app.get("/api/tickets", async (req: Request, res: Response) => {
+app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request, res: Response) => {
   try {
-    const { requesterId, search, status, categoryId, priority, sort, page, limit } =
-      req.query;
-
-    if (!requesterId) {
-      return res.status(400).json({ error: "requesterId query parameter is required" });
-    }
-
-    const parsedRequesterId = parseInt(String(requesterId), 10);
-    if (isNaN(parsedRequesterId)) {
-      return res.status(400).json({ error: "requesterId must be a valid integer" });
-    }
+    const { search, status, categoryId, priority, sort, page, limit } = req.query;
 
     const where: Prisma.TicketWhereInput = {
-      requesterId: parsedRequesterId,
+      requesterId: req.authUser!.id,
     };
 
     if (status && status !== "All") {
@@ -428,39 +405,35 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 6: Ticket Detail, Attachment Lifecycle, and Edit Mode
 // ---------------------------------------------------------------------------
-app.get("/api/tickets/:id", async (req: Request, res: Response) => {
+// BR-32: a Requester requesting another Requester's Ticket gets 404, not
+// 403 — the response must not confirm the Ticket exists at all. This is a
+// deliberate exception to using 403 for authorization failures elsewhere.
+async function findOwnedTicketOr404(res: Response, id: number, requesterId: number) {
+  const ticket = await getPrisma().ticket.findUnique({
+    where: { id },
+    include: {
+      category: true,
+      relatedSystem: true,
+      requester: true,
+      attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
+    },
+  });
+  if (!ticket || ticket.requesterId !== requesterId) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    return null;
+  }
+  return ticket;
+}
+
+app.get("/api/tickets/:id", requireAuth, requirePasswordChanged, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
       return res.status(400).json({ error: "Invalid ticket ID" });
     }
 
-    const ticket = await getPrisma().ticket.findUnique({
-      where: { id },
-      include: {
-        category: true,
-        relatedSystem: true,
-        requester: true,
-        attachments: {
-          where: { isRemoved: false },
-          orderBy: { id: "asc" },
-        },
-      },
-    });
-
-    if (!ticket) {
-      return res.status(404).json({ error: "Ticket not found" });
-    }
-
-    const requesterId = req.query.requesterId ? parseInt(String(req.query.requesterId), 10) : undefined;
-    if (requesterId !== undefined && !isNaN(requesterId) && ticket.requesterId !== requesterId) {
-      return res.status(403).json({
-        error: "Forbidden: You do not have permission to view this ticket.",
-        code: "FORBIDDEN_TICKET_ACCESS",
-        ticketId: id,
-        requestedBy: requesterId,
-      });
-    }
+    const ticket = await findOwnedTicketOr404(res, id, req.authUser!.id);
+    if (!ticket) return;
 
     const removedAttachments = await getPrisma().attachment.findMany({
       where: { ticketId: id, isRemoved: true },
@@ -474,12 +447,15 @@ app.get("/api/tickets/:id", async (req: Request, res: Response) => {
   }
 });
 
-app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
+app.patch("/api/tickets/:id", requireAuth, requirePasswordChanged, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
       return res.status(400).json({ error: "Invalid ticket ID" });
     }
+
+    const owned = await findOwnedTicketOr404(res, id, req.authUser!.id);
+    if (!owned) return;
 
     const { summary, description, priority, categoryId, relatedSystemId } = req.body;
 
@@ -549,6 +525,8 @@ app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
 // Add attachment to existing ticket
 app.post(
   "/api/tickets/:id/attachments",
+  requireAuth,
+  requirePasswordChanged,
   upload.array("attachments", 5),
   async (req: Request, res: Response) => {
     try {
@@ -562,8 +540,8 @@ app.post(
         include: { attachments: { where: { isRemoved: false } } },
       });
 
-      if (!ticket) {
-        return res.status(404).json({ error: "Ticket not found" });
+      if (!ticket || ticket.requesterId !== req.authUser!.id) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
       }
 
       const files = (req.files as Express.Multer.File[]) || [];
@@ -603,6 +581,8 @@ app.post(
 // Soft-remove attachment
 app.delete(
   "/api/tickets/:id/attachments/:attachmentId",
+  requireAuth,
+  requirePasswordChanged,
   async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id, 10);
@@ -611,6 +591,14 @@ app.delete(
 
       if (isNaN(id) || isNaN(attachmentId)) {
         return res.status(400).json({ error: "Invalid parameters" });
+      }
+
+      // Ownership check on the parent Ticket — the previous Lab 2 version
+      // only checked that the attachment belonged to the given ticket ID,
+      // with no check that the requester owned that ticket at all.
+      const ticket = await getPrisma().ticket.findUnique({ where: { id } });
+      if (!ticket || ticket.requesterId !== req.authUser!.id) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
       }
 
       const attachment = await getPrisma().attachment.findFirst({
@@ -641,16 +629,63 @@ app.delete(
   }
 );
 
+// Download an attachment. Added in I-4 — the Lab 2 client previously linked
+// directly to the static /uploads/<file> path, which enforced neither
+// ownership nor removal state despite the Lab 2 report describing 403/410
+// protection there; this endpoint actually provides it.
+app.get(
+  "/api/tickets/:id/attachments/:attachmentId/download",
+  requireAuth,
+  requirePasswordChanged,
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const attachmentId = parseInt(req.params.attachmentId, 10);
+      if (isNaN(id) || isNaN(attachmentId)) {
+        return res.status(400).json({ error: "Invalid parameters" });
+      }
+
+      const ticket = await getPrisma().ticket.findUnique({ where: { id } });
+      if (!ticket || ticket.requesterId !== req.authUser!.id) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+      }
+
+      const attachment = await getPrisma().attachment.findFirst({ where: { id: attachmentId, ticketId: id } });
+      if (!attachment) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Attachment not found." } });
+      }
+      if (attachment.isRemoved) {
+        return res.status(410).json({ error: { code: "ATTACHMENT_REMOVED", message: "This attachment has been removed." } });
+      }
+
+      const absolutePath = path.join(uploadsDir, path.basename(attachment.fileUrl));
+      return res.download(absolutePath, attachment.fileName, (err) => {
+        if (err && !res.headersSent) {
+          res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to download attachment." } });
+        }
+      });
+    } catch (err) {
+      console.error("Download attachment error:", err);
+      return res.status(500).json({ error: "Failed to download attachment" });
+    }
+  }
+);
+
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 4: Create Ticket API (POST /api/tickets)
 // ---------------------------------------------------------------------------
 app.post(
   "/api/tickets",
+  requireAuth,
+  requirePasswordChanged,
   upload.array("attachments", 5),
   async (req: Request, res: Response) => {
     try {
-      const { summary, description, priority, categoryId, relatedSystemId, requesterId } =
-        req.body;
+      const { summary, description, priority, categoryId, relatedSystemId } = req.body;
+      // BR-03: ownership is the authenticated identity, never a client-
+      // supplied requesterId. The field is no longer read from the body at
+      // all — requireAuth has already confirmed this user is active.
+      const requesterId = req.authUser!.id;
 
       const errors: { field: string; message: string }[] = [];
 
@@ -676,14 +711,6 @@ app.post(
         });
       }
 
-      const parsedRequesterId = parseInt(requesterId, 10);
-      if (isNaN(parsedRequesterId)) {
-        errors.push({
-          field: "requesterId",
-          message: "A valid requester ID is required.",
-        });
-      }
-
       if (errors.length > 0) {
         return res.status(400).json({
           error: "Validation failed",
@@ -698,16 +725,6 @@ app.post(
         return res.status(400).json({
           error: "Invalid category",
           details: [{ field: "categoryId", message: "Category does not exist." }],
-        });
-      }
-
-      const requester = await getPrisma().user.findUnique({
-        where: { id: parsedRequesterId },
-      });
-      if (!requester || !requester.isActive) {
-        return res.status(400).json({
-          error: "Invalid requester",
-          details: [{ field: "requesterId", message: "Requester is not active or does not exist." }],
         });
       }
 
@@ -734,7 +751,7 @@ app.post(
           status: TicketStatus.NEW,
           categoryId: parsedCategoryId,
           relatedSystemId: parsedSystemId && !isNaN(parsedSystemId) ? parsedSystemId : null,
-          requesterId: parsedRequesterId,
+          requesterId: requesterId,
           attachments: {
             create: attachmentsData,
           },

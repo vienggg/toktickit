@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useDevRequester } from '../context/DevRequesterContext';
+import { useAuth } from '../context/AuthContext';
+import { apiFetch, parseApiError } from '../api';
 
 interface Category {
   id: number;
@@ -29,7 +30,7 @@ const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 export const CreateTicket: React.FC = () => {
-  const { currentRequester, setIsModalOpen } = useDevRequester();
+  const { user } = useAuth();
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [systems, setSystems] = useState<RelatedSystem[]>([]);
@@ -56,8 +57,8 @@ export const CreateTicket: React.FC = () => {
       setIsLoadingRefData(true);
       try {
         const [catRes, sysRes] = await Promise.all([
-          fetch('/api/categories', { signal: controller.signal }),
-          fetch('/api/systems', { signal: controller.signal }),
+          apiFetch('/api/categories', { signal: controller.signal }),
+          apiFetch('/api/systems', { signal: controller.signal }),
         ]);
 
         if (catRes.ok) {
@@ -148,10 +149,6 @@ export const CreateTicket: React.FC = () => {
     setSubmitError(null);
 
     if (!validateForm()) return;
-    if (!currentRequester) {
-      setSubmitError('Please select a development requester before submitting.');
-      return;
-    }
 
     setIsSubmitting(true);
 
@@ -164,20 +161,20 @@ export const CreateTicket: React.FC = () => {
       if (relatedSystemId) {
         formData.append('relatedSystemId', relatedSystemId);
       }
-      formData.append('requesterId', String(currentRequester.id));
+      // BR-03: ownership comes from the authenticated session on the
+      // server; no requesterId is sent from the client at all any more.
 
       selectedFiles.forEach((file) => {
         formData.append('attachments', file);
       });
 
-      const res = await fetch('/api/tickets', {
+      const res = await apiFetch('/api/tickets', {
         method: 'POST',
         body: formData,
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `Server responded with status ${res.status}`);
+        throw new Error(await parseApiError(res, `Server responded with status ${res.status}`));
       }
 
       const result: CreatedTicketResult = await res.json();
@@ -262,28 +259,20 @@ export const CreateTicket: React.FC = () => {
           )}
 
           <form onSubmit={handleSubmit} noValidate>
-            {/* Requester Identity (Read-only / Locked) */}
+            {/* Requester Identity (Read-only — derived from the authenticated
+                session, per BR-03; there is no longer a way to change it
+                from this screen). */}
             <div className="mb-3 p-3 rounded border bg-light">
-              <div className="d-flex justify-content-between align-items-center mb-2">
-                <label className="form-label text-muted small fw-bold mb-0">
-                  🔒 REQUESTER (LOCKED CONTEXT)
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline-success px-2 py-0.5 d-flex align-items-center gap-1 shadow-sm fw-semibold"
-                  style={{ fontSize: '0.8rem', borderRadius: '0.4rem' }}
-                  onClick={() => setIsModalOpen(true)}
-                >
-                  <span>🔄</span> Change Requester
-                </button>
-              </div>
+              <label className="form-label text-muted small fw-bold mb-2">
+                🔒 REQUESTER (YOUR ACCOUNT)
+              </label>
               <div className="d-flex align-items-center gap-2">
                 <span className="fs-5">👤</span>
                 <span className="fw-semibold text-dark fs-6">
-                  {currentRequester ? currentRequester.name : 'Loading...'}
+                  {user ? user.name : 'Loading...'}
                 </span>
-                <span className="badge bg-secondary ms-1">{currentRequester?.department}</span>
-                <span className="text-muted small ms-auto font-monospace">{currentRequester?.email}</span>
+                <span className="badge bg-secondary ms-1">{user?.department}</span>
+                <span className="text-muted small ms-auto font-monospace">{user?.email}</span>
               </div>
             </div>
 

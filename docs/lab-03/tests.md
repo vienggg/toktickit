@@ -42,8 +42,10 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-06 | API | AC-02, AC-14, BR-02, BR-10 | Change password (forced) | 200, mustChangePassword cleared; rejects reusing initial password; rejects mismatch | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-07 | API | AC-02, FR-04 | mustChangePassword lockout | Any non-allowlisted route returns 403 while true | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | API-08 | API | AC-04, BR-24 | Requester requests Internal Notes | 403, empty body, no note content leaked | `server/tests/lab-03/comments-notes.api.test.ts` | *(I-7 — Internal Notes endpoint does not exist until then)* |
-| API-09 | API | AC-03, BR-03 | Client-supplied requesterId ignored | Authenticated identity determines ownership regardless of body/query override | `server/tests/lab-03/authorization.api.test.ts` | *(I-4 — Requester routes are not yet rewired to the session)* |
-| API-10 | API | AC-17, BR-32 | Cross-requester ticket access | 404 (not 403), no existence confirmation | `server/tests/lab-03/authorization.api.test.ts` | *(I-4)* |
+| API-09 | API | AC-03, BR-03 | Client-supplied requesterId ignored | Authenticated identity determines ownership regardless of body/query override | `server/tests/lab-02/create-ticket.api.test.ts` (API-03b) | Pass |
+| API-10 | API | AC-17, BR-32 | Cross-requester ticket access | 404 (not 403), no existence confirmation | `server/tests/lab-02/ticket-detail.api.test.ts` (API-10c) | Pass |
+| API-10d | API | FR-07 | Unauthenticated access to the Requester Ticket/Category/System routes | 401 across GET/POST/PATCH tickets, attachments, categories, systems | `server/tests/lab-02/{create-ticket,my-tickets,ticket-detail,categories}.api.test.ts` | Pass |
+| API-10e | API | §5.1, §9 | Attachment download endpoint (new in I-4 — did not exist in Lab 2) | Owner downloads 200; non-owner 404; soft-removed attachment 410 | `server/tests/lab-02/ticket-detail.api.test.ts` (API-12b, API-13) | Pass |
 | API-11 | API | FR-07 | Unauthenticated access to any protected route | 401 across the route table | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | API-12 | API | §6 matrix | Full role × endpoint authorization grid | Prints and asserts the matrix in `specification.md` §6 in one run | `server/tests/lab-03/authorization.api.test.ts` | *(grows incrementally — full grid needs I-4/I-6/I-7/I-8 routes to exist; role-gate mechanism itself is covered now by API-21..23 below)* |
 | AUTHZ-01 | API | §6 matrix | requireRole middleware — permitted/rejected role behavior | Permitted role passes through; other role → 403 FORBIDDEN; no auth → 401 | `server/tests/lab-03/authorization.api.test.ts` | Pass |
@@ -70,8 +72,8 @@ Security/Authorization · Migration/Regression · End-to-End.
 
 | Test ID | Type | Requirement/AC | What It Tests | Expected Result | Automated Test File | Final |
 |---|---|---|---|---|---|---|
-| UI-01 | UI Component | AC-01, AC-05 | Login form | Valid submit calls API and redirects; invalid shows generic error; busy state disables button | `client/tests/lab-03/Login.test.tsx` | |
-| UI-02 | UI Component | AC-02, BR-09, BR-11 | Change Password form | Validates policy and confirmation client-side; submits and redirects on success | `client/tests/lab-03/ChangePassword.test.tsx` | |
+| UI-01 | UI Component | AC-01, AC-05 | Login form | Valid submit calls API and redirects; invalid shows generic error; busy state disables button | `client/tests/lab-03/Login.test.tsx` | Pass |
+| UI-02 | UI Component | AC-02, BR-09, BR-11 | Change Password form | Validates policy and confirmation client-side; submits and redirects on success | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
 | UI-03 | UI Component | FR-14 | Staff Queue rendering | Renders rows with correct badges; empty and no-results states render correctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | |
 | UI-04 | UI Style | §1 (ui-spec) | Status/role badge colors | Correct token applied per status/role value | `client/tests/lab-03/StaffTicketQueue.test.tsx` | |
 | UI-05 | Responsive | §9 (ui-spec) | Queue table → card collapse | Mobile viewport renders card layout, not the desktop table | `client/tests/lab-03/StaffTicketQueue.test.tsx` | |

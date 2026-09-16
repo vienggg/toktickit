@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { DevRequesterProvider } from '../../src/context/DevRequesterContext';
+import { AuthProvider } from '../../src/context/AuthContext';
 import { CreateTicket } from '../../src/components/CreateTicket';
 
-const mockRequesters = [
-  { id: 1, name: 'Jennifer Anderson', email: 'jennifer.anderson@toktick.internal', department: 'Finance', isActive: true },
-];
+const mockUser = {
+  id: 1,
+  name: 'Jennifer Anderson',
+  email: 'jennifer.anderson@toktick.internal',
+  department: 'Finance',
+  role: 'REQUESTER',
+  mustChangePassword: false,
+};
 
 const mockCategories = [
   { id: 1, name: 'Hardware' },
@@ -19,13 +24,12 @@ const mockSystems = [
 
 describe('Create Ticket Screen & Zen Green Form UI (UI-02, UI-03)', () => {
   beforeEach(() => {
-    localStorage.clear();
     vi.restoreAllMocks();
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL) => {
       const urlStr = String(url);
-      if (urlStr.includes('/api/dev/requesters')) {
-        return { ok: true, json: async () => mockRequesters } as Response;
+      if (urlStr.includes('/api/auth/me')) {
+        return { ok: true, json: async () => ({ user: mockUser }) } as Response;
       }
       if (urlStr.includes('/api/categories')) {
         return { ok: true, json: async () => mockCategories } as Response;
@@ -53,11 +57,11 @@ describe('Create Ticket Screen & Zen Green Form UI (UI-02, UI-03)', () => {
     });
   });
 
-  it('UI-02: pre-populates locked requester and loads category/system dropdowns', async () => {
+  it('UI-02: shows the authenticated requester identity (read-only) and loads category/system dropdowns', async () => {
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -70,9 +74,9 @@ describe('Create Ticket Screen & Zen Green Form UI (UI-02, UI-03)', () => {
 
   it('UI-03: renders field-level validation errors on empty submission, and displays success banner on submit', async () => {
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <CreateTicket />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {

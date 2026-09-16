@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useDevRequester } from '../context/DevRequesterContext';
+import { apiFetch, parseApiError } from '../api';
 
 interface Attachment {
   id: number;
@@ -48,8 +48,6 @@ interface TicketDetailProps {
 }
 
 export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
-  const { currentRequester } = useDevRequester();
-
   const [ticket, setTicket] = useState<TicketDetailData | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [systems, setSystems] = useState<SystemOption[]>([]);
@@ -77,9 +75,9 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/tickets/${ticketId}`, { signal });
+      const res = await apiFetch(`/api/tickets/${ticketId}`, { signal });
       if (!res.ok) {
-        throw new Error(`Ticket not found or error loading (HTTP ${res.status})`);
+        throw new Error(await parseApiError(res, `Ticket not found or error loading (HTTP ${res.status})`));
       }
       const data: TicketDetailData = await res.json();
       setTicket(data);
@@ -109,8 +107,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     async function loadRef() {
       try {
         const [catRes, sysRes] = await Promise.all([
-          fetch('/api/categories', { signal: controller.signal }),
-          fetch('/api/systems', { signal: controller.signal }),
+          apiFetch('/api/categories', { signal: controller.signal }),
+          apiFetch('/api/systems', { signal: controller.signal }),
         ]);
         if (catRes.ok) setCategories(await catRes.json());
         if (sysRes.ok) setSystems(await sysRes.json());
@@ -179,15 +177,14 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
         relatedSystemId: editRelatedSystemId ? parseInt(editRelatedSystemId, 10) : null,
       };
 
-      const res = await fetch(`/api/tickets/${ticketId}`, {
+      const res = await apiFetch(`/api/tickets/${ticketId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Update failed (HTTP ${res.status})`);
+        throw new Error(await parseApiError(res, `Update failed (HTTP ${res.status})`));
       }
 
       const updatedData: TicketDetailData = await res.json();
@@ -218,14 +215,13 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
       const formData = new FormData();
       files.forEach((file) => formData.append('attachments', file));
 
-      const res = await fetch(`/api/tickets/${ticketId}/attachments`, {
+      const res = await apiFetch(`/api/tickets/${ticketId}/attachments`, {
         method: 'POST',
         body: formData,
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Upload failed');
+        throw new Error(await parseApiError(res, 'Upload failed'));
       }
 
       await fetchTicketDetail();
@@ -242,7 +238,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     if (!targetAttachmentToRemove) return;
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/tickets/${ticketId}/attachments/${targetAttachmentToRemove.id}`,
         {
           method: 'DELETE',
@@ -595,7 +591,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                       <span className="fs-4">📄</span>
                       <div>
                         <a
-                          href={att.fileUrl}
+                          href={`/api/tickets/${ticketId}/attachments/${att.id}/download`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="fw-semibold text-zen-primary text-decoration-none"
