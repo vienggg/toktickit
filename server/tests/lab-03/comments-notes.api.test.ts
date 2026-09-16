@@ -113,11 +113,63 @@ describe('Public Comments and Resolution Signal (API-18, API-19)', () => {
     });
 
     it('API-18b: a Requester cannot set the ticket to RESOLVED or CLOSED directly (BR-05) — no status field is accepted by this route', async () => {
-      const res = await agent.post(`/api/tickets/${ticketId}/resolution-signal`).send({ status: 'RESOLVED' });
+      // A fresh ticket, not the shared one from API-18a (which the
+      // idempotency fix in API-18f now correctly blocks a second signal
+      // on) -- this test is about the status field having no effect, not
+      // about repeat calls.
+      const prisma = getPrisma();
+      const category = await prisma.category.findFirstOrThrow();
+      const requester = await prisma.user.findUniqueOrThrow({ where: { email: REGRESSION_REQUESTER_EMAIL } });
+      const freshTicket = await prisma.ticket.create({
+        data: {
+          ticketNumber: `TKT-2026-STF${Date.now().toString().slice(-6)}`,
+          summary: 'Status-field-spoof fixture',
+          description: 'Verifies a status field in the body has no effect.',
+          requestedPriority: 'LOW',
+          status: 'NEW',
+          categoryId: category.id,
+          requesterId: requester.id,
+        },
+      });
+
+      const res = await agent.post(`/api/tickets/${freshTicket.id}/resolution-signal`).send({ status: 'RESOLVED' });
       expect(res.status).toBe(200); // the request succeeds...
-      const ticket = await getPrisma().ticket.findUniqueOrThrow({ where: { id: ticketId } });
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: freshTicket.id } });
       expect(ticket.status).not.toBe('RESOLVED'); // ...but status never actually changes
       expect(ticket.status).not.toBe('CLOSED');
+      expect(ticket.status).toBe('NEW');
+    });
+
+    it('API-18f: a second call on the same still-open ticket is rejected with 409, not overwritten or duplicated (idempotency)', async () => {
+      const prisma = getPrisma();
+      const category = await prisma.category.findFirstOrThrow();
+      const requester = await prisma.user.findUniqueOrThrow({ where: { email: REGRESSION_REQUESTER_EMAIL } });
+      const freshTicket = await prisma.ticket.create({
+        data: {
+          ticketNumber: `TKT-2026-IDP${Date.now().toString().slice(-6)}`,
+          summary: 'Idempotency fixture',
+          description: 'Verifies a repeat resolution-signal call is rejected.',
+          requestedPriority: 'LOW',
+          status: 'NEW',
+          categoryId: category.id,
+          requesterId: requester.id,
+        },
+      });
+
+      const first = await agent.post(`/api/tickets/${freshTicket.id}/resolution-signal`);
+      expect(first.status).toBe(200);
+      const firstResolvedAt = first.body.requesterResolvedAt;
+
+      const second = await agent.post(`/api/tickets/${freshTicket.id}/resolution-signal`);
+      expect(second.status).toBe(409);
+
+      const ticket = await prisma.ticket.findUniqueOrThrow({ where: { id: freshTicket.id } });
+      expect(new Date(ticket.requesterResolvedAt!).toISOString()).toBe(new Date(firstResolvedAt).toISOString());
+
+      const comments = await prisma.publicComment.findMany({
+        where: { ticketId: freshTicket.id, body: { contains: 'resolved' } },
+      });
+      expect(comments).toHaveLength(1); // not duplicated by the rejected second call
     });
 
     it('API-18c: is rejected with 409 once the ticket is already RESOLVED/CLOSED/CANCELLED', async () => {

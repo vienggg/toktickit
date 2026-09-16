@@ -48,19 +48,34 @@ const LEGACY_PRIORITY: Record<Priority, string> = {
   URGENT: "Urgent",
 };
 
+// BR-05, D-10: statuses where "Problem Appears Resolved" no longer applies.
+// Single source of truth, referenced both by the resolution-signal route's
+// own 409 check and by serializeTicket's canSignalResolution flag below.
+// Fixed in review (PR #66): the client previously duplicated this list
+// independently (with dead entries, since two of the four raw enum values
+// can never actually reach it — see LEGACY_STATUS above), so a future
+// change here would silently stop matching the client's copy. The client
+// now reads canSignalResolution directly instead of recomputing it.
+const RESOLUTION_SIGNAL_BLOCKED_STATUSES: TicketStatus[] = [
+  TicketStatus.RESOLVED,
+  TicketStatus.CLOSED,
+  TicketStatus.CANCELLED,
+];
+
 // The Prisma field is `requestedPriority` (Lab 3), but the Lab 2 client and
 // its existing tests still read `priority` (Title-Case) and `status`
 // (Title-Case/underscore) from API responses. This keeps the wire contract
 // unchanged until I-4 reworks the client/tests together; I-2's scope is
 // the data model only.
-function serializeTicket<T extends { requestedPriority: Priority; status: TicketStatus }>(
+function serializeTicket<T extends { requestedPriority: Priority; status: TicketStatus; requesterResolvedAt?: Date | null }>(
   ticket: T
-): Omit<T, "requestedPriority" | "status"> & { priority: string; status: string } {
+): Omit<T, "requestedPriority" | "status"> & { priority: string; status: string; canSignalResolution: boolean } {
   const { requestedPriority, status, ...rest } = ticket;
   return {
     ...rest,
     priority: LEGACY_PRIORITY[requestedPriority],
     status: LEGACY_STATUS[status] ?? status,
+    canSignalResolution: !RESOLUTION_SIGNAL_BLOCKED_STATUSES.includes(status) && !ticket.requesterResolvedAt,
   };
 }
 
@@ -411,37 +426,75 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 6: Ticket Detail, Attachment Lifecycle, and Edit Mode
 // ---------------------------------------------------------------------------
+// Strict integer parsing for route params. Fixed in review (PR #66):
+// parseInt("5abc", 10) === 5, silently accepting trailing garbage instead
+// of rejecting a malformed ID. Applied to every :id/:attachmentId param in
+// this file, not just the new I-5 routes the review was looking at.
+function parseStrictId(raw: string | undefined): number | null {
+  if (raw === undefined || !/^\d+$/.test(raw)) return null;
+  const id = parseInt(raw, 10);
+  return Number.isSafeInteger(id) ? id : null;
+}
+
 // BR-32: a Requester requesting another Requester's Ticket gets 404, not
 // 403 — the response must not confirm the Ticket exists at all. This is a
 // deliberate exception to using 403 for authorization failures elsewhere.
 //
-// This is the SINGLE canonical ownership check for every Requester-scoped
-// Ticket route below — reviewed and fixed to close two issues: the check
-// was being hand-rolled inline in three separate places (a future edit to
-// one copy could silently diverge from the others), and for the attachment
-// upload route specifically, multer's disk-write middleware was running
-// BEFORE the ownership check, so a non-owner repeatedly POSTing to another
-// user's ticket ID still left orphaned files on disk under a 404 response.
-// Running this as route middleware, ahead of upload.array(), fixes both:
-// one implementation, and it gates multer rather than following it.
-async function findOwnedTicketOr404(res: Response, id: number, requesterId: number) {
-  const ticket = await getPrisma().ticket.findUnique({
-    where: { id },
-    include: {
-      category: true,
-      relatedSystem: true,
-      requester: true,
-      attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
-    },
-  });
-  if (!ticket || ticket.requesterId !== requesterId) {
+// This is the SINGLE canonical implementation of that 404-masking response
+// for every Ticket-scoped route below (fixed in review of PR #66, which
+// had reintroduced a second, independent copy of this same masking logic
+// for the I-5 comments/resolution routes — a future fix to the rule
+// applied to one would not have automatically applied to the other).
+// Different routes need different authorization rules (strict Requester
+// ownership vs. Requester-owns-or-is-staff visibility) and different
+// amounts of ticket detail, so this is a shared core parameterized by
+// both, not a single fetch-everything function.
+async function fetchAuthorizedTicketOr404<T extends { requesterId: number }>(
+  res: Response,
+  fetchTicket: () => Promise<T | null>,
+  isAuthorized: (ticket: T) => boolean
+): Promise<T | null> {
+  const ticket = await fetchTicket();
+  if (!ticket || !isAuthorized(ticket)) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
     return null;
   }
   return ticket;
 }
 
+// Full detail (category/relatedSystem/requester/attachments) for GET/PATCH,
+// which return this shape directly to the client.
+async function findOwnedTicketOr404(res: Response, id: number, requesterId: number) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () =>
+      getPrisma().ticket.findUnique({
+        where: { id },
+        include: {
+          category: true,
+          relatedSystem: true,
+          requester: true,
+          attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
+        },
+      }),
+    (ticket) => ticket.requesterId === requesterId
+  );
+}
+
+// Same strict-ownership rule, no joins — for routes that only need
+// id/status (the resolution signal). Fixed in review: this previously
+// reused findOwnedTicketOr404's full-include query for a handler that
+// only reads two scalar fields.
+async function findOwnedTicketLightOr404(res: Response, id: number, requesterId: number) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () => getPrisma().ticket.findUnique({ where: { id } }),
+    (ticket) => ticket.requesterId === requesterId
+  );
+}
+
 type OwnedTicket = NonNullable<Awaited<ReturnType<typeof findOwnedTicketOr404>>>;
+type OwnedTicketLight = NonNullable<Awaited<ReturnType<typeof findOwnedTicketLightOr404>>>;
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -449,18 +502,31 @@ declare global {
     interface Request {
       /** Set by requireOwnedTicketParam once ownership is confirmed. */
       ownedTicket?: OwnedTicket;
+      /** Set by requireOwnedTicketParamLight once ownership is confirmed. */
+      ownedTicketLight?: OwnedTicketLight;
     }
   }
 }
 
 async function requireOwnedTicketParam(req: Request, res: Response, next: NextFunction) {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
+  const id = parseStrictId(req.params.id);
+  if (id === null) {
     return res.status(400).json({ error: "Invalid ticket ID" });
   }
   const ticket = await findOwnedTicketOr404(res, id, req.authUser!.id);
   if (!ticket) return; // findOwnedTicketOr404 already sent the 404 response
   req.ownedTicket = ticket;
+  next();
+}
+
+async function requireOwnedTicketParamLight(req: Request, res: Response, next: NextFunction) {
+  const id = parseStrictId(req.params.id);
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid ticket ID" });
+  }
+  const ticket = await findOwnedTicketLightOr404(res, id, req.authUser!.id);
+  if (!ticket) return;
+  req.ownedTicketLight = ticket;
   next();
 }
 
@@ -606,9 +672,9 @@ app.delete(
   async (req: Request, res: Response) => {
     try {
       const ticket = req.ownedTicket!;
-      const attachmentId = parseInt(req.params.attachmentId, 10);
+      const attachmentId = parseStrictId(req.params.attachmentId);
       const reason = req.body?.reason || "Removed by user";
-      if (isNaN(attachmentId)) {
+      if (attachmentId === null) {
         return res.status(400).json({ error: "Invalid parameters" });
       }
 
@@ -655,8 +721,8 @@ app.get(
   async (req: Request, res: Response) => {
     try {
       const ticket = req.ownedTicket!;
-      const attachmentId = parseInt(req.params.attachmentId, 10);
-      if (isNaN(attachmentId)) {
+      const attachmentId = parseStrictId(req.params.attachmentId);
+      if (attachmentId === null) {
         return res.status(400).json({ error: "Invalid parameters" });
       }
 
@@ -790,20 +856,15 @@ app.post(
 // Staff, and Administrator. A Requester who does not own the Ticket gets 404
 // (BR-32) — the IT Staff/Administrator staff-side UI (I-6/I-7) reuses this
 // same endpoint against any Ticket, so only the Requester path is
-// ownership-scoped here.
+// ownership-scoped here. Built on the same fetchAuthorizedTicketOr404 core
+// as findOwnedTicketOr404 above (fixed in review: this previously
+// reimplemented the 404-masking response independently).
 async function findVisibleTicketOr404(res: Response, id: number, authUser: NonNullable<Request["authUser"]>) {
-  const ticket = await getPrisma().ticket.findUnique({ where: { id } });
-  if (!ticket) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
-    return null;
-  }
-  if (authUser.role === Role.REQUESTER && ticket.requesterId !== authUser.id) {
-    // BR-32 masking applies here too: a Requester gets the identical 404 a
-    // missing Ticket would produce, not a 403 that confirms it exists.
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
-    return null;
-  }
-  return ticket;
+  return fetchAuthorizedTicketOr404(
+    res,
+    () => getPrisma().ticket.findUnique({ where: { id } }),
+    (ticket) => authUser.role !== Role.REQUESTER || ticket.requesterId === authUser.id
+  );
 }
 
 type VisibleTicket = NonNullable<Awaited<ReturnType<typeof findVisibleTicketOr404>>>;
@@ -818,8 +879,8 @@ declare global {
 }
 
 async function requireTicketVisibleToUser(req: Request, res: Response, next: NextFunction) {
-  const id = parseInt(req.params.id, 10);
-  if (isNaN(id)) {
+  const id = parseStrictId(req.params.id);
+  if (id === null) {
     return res.status(400).json({ error: "Invalid ticket ID" });
   }
   const ticket = await findVisibleTicketOr404(res, id, req.authUser!);
@@ -906,46 +967,79 @@ app.post(
 // is a flag plus an auto-generated Public Comment — never a status change.
 // A client sending a status field alongside this call has no effect; there
 // is no status field in this route's contract at all.
-const RESOLUTION_SIGNAL_BLOCKED_STATUSES: TicketStatus[] = [
-  TicketStatus.RESOLVED,
-  TicketStatus.CLOSED,
-  TicketStatus.CANCELLED,
-];
+// (RESOLUTION_SIGNAL_BLOCKED_STATUSES is defined near serializeTicket at
+// the top of this file, shared with the canSignalResolution flag.)
+
+function createResolutionComment(tx: Prisma.TransactionClient, ticketId: number, authorId: number) {
+  return tx.publicComment.create({
+    data: {
+      ticketId,
+      authorId,
+      body: "The Requester has indicated that this problem appears resolved.",
+    },
+    include: { author: { select: { id: true, name: true, role: true } } },
+  });
+}
 
 app.post(
   "/api/tickets/:id/resolution-signal",
   requireAuth,
   requirePasswordChanged,
-  requireOwnedTicketParam,
+  requireOwnedTicketParamLight,
   async (req: Request, res: Response) => {
     try {
-      const ticket = req.ownedTicket!;
-      if (RESOLUTION_SIGNAL_BLOCKED_STATUSES.includes(ticket.status)) {
+      const ticket = req.ownedTicketLight!;
+      const now = new Date();
+
+      // Fixed in review: this previously only checked terminal status,
+      // never whether requesterResolvedAt was already set, so a
+      // double-click or retry on a still-open ticket would overwrite the
+      // timestamp and create a duplicate comment on every call. The check
+      // is also done as the WHERE clause of the UPDATE itself (inside the
+      // transaction), not read-then-write from req.ownedTicketLight, so a
+      // concurrent second request can't race past a stale in-memory read —
+      // Postgres serializes the two UPDATEs on this row, and the second
+      // one's WHERE clause simply won't match anymore once the first has
+      // committed.
+      // The transaction returns the created comment directly (or null if
+      // the conditional update didn't match) into a plain const, rather
+      // than mutating closure-captured `let`s — TypeScript narrows a
+      // function's own return value normally; it does not narrow a `let`
+      // reassigned from inside a nested closure.
+      const createdComment = await getPrisma().$transaction(async (tx) => {
+        const result = await tx.ticket.updateMany({
+          where: {
+            id: ticket.id,
+            status: { notIn: RESOLUTION_SIGNAL_BLOCKED_STATUSES },
+            requesterResolvedAt: null,
+          },
+          data: { requesterResolvedAt: now },
+        });
+        if (result.count === 0) return null;
+        return createResolutionComment(tx, ticket.id, req.authUser!.id);
+      });
+
+      if (!createdComment) {
         return res.status(409).json({
           error: {
-            code: "TICKET_ALREADY_TERMINAL",
-            message: "This ticket is already resolved, closed, or cancelled.",
+            code: "TICKET_ALREADY_TERMINAL_OR_SIGNALED",
+            message: "This ticket is already resolved, closed, cancelled, or has already been signaled.",
           },
         });
       }
 
-      const [updated] = await getPrisma().$transaction([
-        getPrisma().ticket.update({
-          where: { id: ticket.id },
-          data: { requesterResolvedAt: new Date() },
-        }),
-        getPrisma().publicComment.create({
-          data: {
-            ticketId: ticket.id,
-            authorId: req.authUser!.id,
-            body: "The Requester has indicated that this problem appears resolved.",
-          },
-        }),
-      ]);
-
       return res.status(200).json({
-        id: updated.id,
-        requesterResolvedAt: updated.requesterResolvedAt,
+        id: ticket.id,
+        requesterResolvedAt: now,
+        comment: {
+          id: createdComment.id,
+          ticketId: createdComment.ticketId,
+          authorId: createdComment.authorId,
+          authorName: createdComment.author.name,
+          authorRole: createdComment.author.role,
+          body: createdComment.body,
+          createdAt: createdComment.createdAt,
+        },
       });
     } catch (err) {
       console.error("Resolution signal error:", err);

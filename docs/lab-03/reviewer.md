@@ -19,7 +19,7 @@
 | [#63](https://github.com/vienggg/toktickit/pull/63) | feat(lab3): data model, migration, and seed for Users, Roles, and Ticket workflow | `feature/lab3-user-model-and-migration` | `lab3-staging` | Approved & Merged |
 | [#64](https://github.com/vienggg/toktickit/pull/64) | feat(lab3): authentication foundation — login, logout, me, change-password | `feature/lab3-auth-foundation` | `lab3-staging` | Approved & Merged |
 | [#65](https://github.com/vienggg/toktickit/pull/65) | feat(lab3): auth UI, routing, and Requester regression | `feature/lab3-auth-shell-and-regression` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
-| — | I-5: Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Pending |
+| [#66](https://github.com/vienggg/toktickit/pull/66) | feat(lab3): Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Changes Requested → Fixing → re-review pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
@@ -79,6 +79,59 @@ what this document says.
 > (Lab 2 behavior) — the change was unintentional drift, not a decision.
 > (9) Added `credentials: 'include'` to `checkSystem()`'s `/api/categories`
 > call. All 68 server tests (+6 new) and 17 client tests pass.
+
+#### PR #66: Requester Public Comments and resolution signal — Changes Requested (@projectnewy, 2026-09-16)
+
+> **Reviewer Feedback:** Eight findings, two blocking. (1) `POST
+> .../resolution-signal` had no idempotency guard — the 409 check only
+> covered terminal status, never whether `requesterResolvedAt` was already
+> set, so a double-click or retry on a still-open ticket overwrote the
+> timestamp and created a duplicate comment every time; the terminal-status
+> read was also not re-checked inside the transaction, so it wasn't
+> atomic. (2) the new `requireTicketVisibleToUser`/`findVisibleTicketOr404`
+> reimplemented the same 404-masking logic PR #65 had just consolidated
+> into one helper, reintroducing a second independent copy. (3) the
+> client's `RESOLUTION_TERMINAL_STATUSES` list had dead entries (two raw
+> uppercase values that can never reach the client once
+> `serializeTicket`'s legacy mapping runs) and wasn't derived from any
+> shared source with the server's own list. (4) `fetchComments` silently
+> swallowed a non-ok response, unlike `fetchTicketDetail`'s handling in
+> the same file. (5) `handlePostComment`/`handleSignalResolution`
+> discarded their POST response and re-fetched instead — the resolution
+> handler's re-fetch of the whole ticket also flipped `isLoading` and
+> unmounted the detail view. (6) the resolution route reused the
+> heavy `findOwnedTicketOr404` (with joins) for a handler that only reads
+> `id`/`status`. (7) `parseInt(req.params.id, 10)` accepts trailing
+> garbage (`"5abc"` → `5`) — a pre-existing pattern copy-pasted into the
+> new route rather than fixed. (8) `authorRole` was fetched and typed on
+> the client but never rendered.
+>
+> **Author Response (@vienggg):** All eight addressed on the same branch.
+> (1) Rewrote the guard as a single conditional `updateMany` (`WHERE id =
+> ? AND status NOT IN (...) AND requesterResolvedAt IS NULL`) inside the
+> transaction — atomic by construction, since Postgres serializes
+> concurrent UPDATEs on the same row and the second one's WHERE simply
+> won't match once the first has committed. Added `API-18f` testing a
+> second call is rejected and creates no duplicate. (2) Introduced one
+> shared `fetchAuthorizedTicketOr404` core, parameterized by an
+> authorization predicate and a fetch strategy; `findOwnedTicketOr404`
+> (strict ownership, full detail), `findOwnedTicketLightOr404` (strict
+> ownership, no joins), and `findVisibleTicketOr404` (role-aware
+> visibility, no joins) are now three thin call sites over that one core.
+> (3) Moved the status list to the server as the single source of truth
+> and added a computed `canSignalResolution` boolean to `serializeTicket`'s
+> output; the client reads that flag directly and no longer duplicates any
+> status logic. (4) `fetchComments` now sets a visible error on a non-ok
+> response. (5) Both handlers now read the POST/resolution-signal response
+> directly — the resolution route was changed to also return the created
+> comment so the client never needs a follow-up request for either
+> action. (6) Resolution-signal now uses `findOwnedTicketLightOr404`. (7)
+> Added a `parseStrictId` helper (regex-validated, not `parseInt`'s
+> permissive trailing-garbage behavior) and applied it to every
+> `:id`/`:attachmentId` route param in the file, not just the new I-5
+> routes. (8) `authorRole` is now rendered as a small badge next to the
+> author's name for any non-Requester author. All 82 server tests (+1 new)
+> and 19 client tests pass.
 
 ---
 

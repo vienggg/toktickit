@@ -29,6 +29,12 @@ interface TicketDetailData {
   attachments: Attachment[];
   removedAttachments?: Attachment[];
   requesterResolvedAt?: string | null;
+  // Server-computed (BR-05, D-10): true unless the ticket is already
+  // terminal or already signaled. Fixed in review: this used to be a
+  // client-side duplicate of the server's status list, with two dead
+  // entries (raw uppercase values that could never actually reach the
+  // client) and no shared source of truth with the server's own check.
+  canSignalResolution: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -43,9 +49,11 @@ interface PublicCommentData {
   createdAt: string;
 }
 
-// Terminal statuses where "Problem Appears Resolved" no longer applies —
-// mirrors the server's RESOLUTION_SIGNAL_BLOCKED_STATUSES (BR-05).
-const RESOLUTION_TERMINAL_STATUSES = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'CANCELLED'];
+const ROLE_LABEL: Record<string, string> = {
+  REQUESTER: 'Requester',
+  IT_STAFF: 'IT Staff',
+  ADMINISTRATOR: 'Administrator',
+};
 
 interface CategoryOption {
   id: number;
@@ -99,12 +107,17 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   const fetchComments = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await apiFetch(`/api/tickets/${ticketId}/comments`, { signal });
-      if (res.ok) {
-        setComments(await res.json());
+      if (!res.ok) {
+        // Fixed in review: this previously did nothing on a non-ok
+        // response, leaving a stale/empty list with no indication
+        // anything had failed — unlike fetchTicketDetail's own handling.
+        setCommentError(await parseApiError(res, `Failed to load comments (HTTP ${res.status})`));
+        return;
       }
+      setComments(await res.json());
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'AbortError') {
-        console.error('Failed to load comments:', err);
+        setCommentError('Failed to load comments. Please try again.');
       }
     }
   }, [ticketId]);
@@ -184,8 +197,11 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
       if (!res.ok) {
         throw new Error(await parseApiError(res, 'Failed to post comment'));
       }
+      // Fixed in review: append the comment the POST response already
+      // returned instead of re-fetching the whole thread for one row.
+      const created: PublicCommentData = await res.json();
+      setComments((prev) => [...prev, created]);
       setNewComment('');
-      await fetchComments();
     } catch (err) {
       setCommentError(err instanceof Error ? err.message : 'Failed to post comment');
     } finally {
@@ -201,7 +217,14 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
       if (!res.ok) {
         throw new Error(await parseApiError(res, 'Failed to record your response'));
       }
-      await Promise.all([fetchTicketDetail(isEditing), fetchComments()]);
+      // Fixed in review: merge the response directly instead of
+      // re-fetching the entire ticket (which flips isLoading and
+      // unmounts the whole detail view, discarding any in-progress edit)
+      // and re-fetching the whole comment thread, when the response
+      // already contains both the new timestamp and the created comment.
+      const data: { requesterResolvedAt: string; comment: PublicCommentData } = await res.json();
+      setTicket((prev) => (prev ? { ...prev, requesterResolvedAt: data.requesterResolvedAt, canSignalResolution: false } : prev));
+      setComments((prev) => [...prev, data.comment]);
     } catch (err) {
       setResolutionSignalError(err instanceof Error ? err.message : 'Failed to record your response');
     } finally {
@@ -771,7 +794,14 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                     style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)' }}
                   >
                     <div className="d-flex justify-content-between align-items-center mb-1">
-                      <span className="fw-semibold text-dark small">{c.authorName}</span>
+                      <span className="fw-semibold text-dark small d-flex align-items-center gap-2">
+                        {c.authorName}
+                        {c.authorRole !== 'REQUESTER' && (
+                          <span className="badge bg-secondary" style={{ fontSize: '0.65rem' }}>
+                            {ROLE_LABEL[c.authorRole] ?? c.authorRole}
+                          </span>
+                        )}
+                      </span>
                       <span className="text-muted small">{formatDate(c.createdAt)}</span>
                     </div>
                     <div className="text-dark" style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
@@ -821,7 +851,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                 ✅ You indicated this problem appears resolved on {formatDate(ticket.requesterResolvedAt)}.
               </p>
             ) : (
-              !RESOLUTION_TERMINAL_STATUSES.includes(ticket.status) && (
+              ticket.canSignalResolution && (
                 <button
                   type="button"
                   className="btn btn-zen-outline btn-sm"

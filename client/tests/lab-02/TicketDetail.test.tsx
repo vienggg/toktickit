@@ -37,6 +37,8 @@ const mockTicketData = {
       uploadedAt: '2026-08-20T10:00:00Z',
     },
   ],
+  requesterResolvedAt: null,
+  canSignalResolution: true,
   createdAt: '2026-08-20T10:00:00Z',
   updatedAt: '2026-08-20T10:00:00Z',
 };
@@ -94,7 +96,20 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
       }
       if (urlStr.includes('/api/tickets/1/resolution-signal') && options?.method === 'POST') {
         resolutionSignalCalled = true;
-        return { ok: true, json: async () => ({ id: 1, requesterResolvedAt: '2026-08-22T10:00:00Z' }) } as Response;
+        const comment = {
+          id: 999,
+          ticketId: 1,
+          authorId: 1,
+          authorName: 'Jennifer Anderson',
+          authorRole: 'REQUESTER',
+          body: 'The Requester has indicated that this problem appears resolved.',
+          createdAt: '2026-08-22T10:00:00Z',
+        };
+        mockComments = [...mockComments, comment];
+        return {
+          ok: true,
+          json: async () => ({ id: 1, requesterResolvedAt: '2026-08-22T10:00:00Z', comment }),
+        } as Response;
       }
       if (urlStr.includes('/api/tickets/1') && options?.method === 'PATCH') {
         return {
@@ -112,6 +127,7 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
           json: async () => ({
             ...mockTicketData,
             requesterResolvedAt: resolutionSignalCalled ? '2026-08-22T10:00:00Z' : null,
+            canSignalResolution: !resolutionSignalCalled,
           }),
         } as Response;
       }
