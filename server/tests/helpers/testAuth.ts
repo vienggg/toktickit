@@ -43,3 +43,47 @@ export async function loginAsRegressionRequester() {
   }
   return agent;
 }
+
+// A second, entirely separate fixture account for "some other Requester"
+// scenarios (cross-requester 404 masking tests). Fixed in review: an
+// earlier version of this had those tests pick a random real seeded
+// REQUESTER and temporarily flip its mustChangePassword flag, which could
+// race with another test file doing the same thing to the same account
+// (e.g. Jennifer Anderson) under Vitest's default cross-file parallelism —
+// one test's mid-request restore could flip the flag while another test's
+// request was in flight, producing an intermittent 403 instead of the
+// asserted 404. A dedicated fixture with mustChangePassword already false
+// removes the shared mutable state entirely, not just the race window.
+export const REGRESSION_OTHER_REQUESTER_EMAIL = "regression-suite-other-requester@toktick.internal";
+export const REGRESSION_OTHER_REQUESTER_PASSWORD = "RegressionTest456";
+
+export async function ensureRegressionOtherRequester() {
+  const prisma = getPrisma();
+  return prisma.user.upsert({
+    where: { email: REGRESSION_OTHER_REQUESTER_EMAIL },
+    update: { isActive: true, mustChangePassword: false, passwordHash: hashPassword(REGRESSION_OTHER_REQUESTER_PASSWORD) },
+    create: {
+      name: "Regression Suite Other Requester",
+      email: REGRESSION_OTHER_REQUESTER_EMAIL,
+      department: "QA",
+      role: Role.REQUESTER,
+      passwordHash: hashPassword(REGRESSION_OTHER_REQUESTER_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+}
+
+/** Returns a supertest agent already logged in as the "someone else" fixture requester. */
+export async function loginAsRegressionOtherRequester() {
+  await ensureRegressionOtherRequester();
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_OTHER_REQUESTER_EMAIL,
+    password: REGRESSION_OTHER_REQUESTER_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression other requester: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}

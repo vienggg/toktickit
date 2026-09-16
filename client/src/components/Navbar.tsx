@@ -32,7 +32,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           href="#home"
           onClick={(e) => {
             e.preventDefault();
-            setCurrentView('list');
+            // Reverted in review: this had drifted to 'list' with no
+            // stated reason. Restoring the Lab 2 behavior (brand click ->
+            // Create Ticket) since this PR's scope is auth/regression, not
+            // a navigation redesign.
+            setCurrentView('create');
           }}
         >
           <span

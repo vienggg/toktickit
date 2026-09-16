@@ -18,7 +18,10 @@ export interface SystemStatus {
 export async function checkSystem(): Promise<SystemStatus> {
   const healthRes = await fetch(`${API_URL}/api/health`);
   if (!healthRes.ok) throw new Error("Health check failed");
-  const catRes = await fetch(`${API_URL}/api/categories`);
+  // Fixed in review (PR #65): /api/categories has required authentication
+  // since I-4. This was unused in the app but would 401 silently the
+  // moment it's reused, with no cookie attached to explain why.
+  const catRes = await fetch(`${API_URL}/api/categories`, { credentials: "include" });
   if (!catRes.ok) throw new Error("Failed to fetch categories");
   const categories: Category[] = await catRes.json();
   return { online: true, categories };

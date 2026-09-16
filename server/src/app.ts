@@ -131,7 +131,13 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
-app.use("/uploads", express.static(uploadsDir));
+// Deliberately NOT mounting express.static(uploadsDir) at a public path.
+// Fixed in review: an unauthenticated static mount here would let anyone
+// who has ever seen a fileUrl (network tab, cache, shared link) fetch it
+// directly with no ownership check and no 410 for removed attachments —
+// exactly the gap GET /api/tickets/:id/attachments/:attachmentId/download
+// exists to close. Attachments are served exclusively through that
+// authenticated, ownership-checked route.
 
 app.get("/", (_req: Request, res: Response) => {
   res.json({
@@ -408,6 +414,16 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
 // BR-32: a Requester requesting another Requester's Ticket gets 404, not
 // 403 — the response must not confirm the Ticket exists at all. This is a
 // deliberate exception to using 403 for authorization failures elsewhere.
+//
+// This is the SINGLE canonical ownership check for every Requester-scoped
+// Ticket route below — reviewed and fixed to close two issues: the check
+// was being hand-rolled inline in three separate places (a future edit to
+// one copy could silently diverge from the others), and for the attachment
+// upload route specifically, multer's disk-write middleware was running
+// BEFORE the ownership check, so a non-owner repeatedly POSTing to another
+// user's ticket ID still left orphaned files on disk under a 404 response.
+// Running this as route middleware, ahead of upload.array(), fixes both:
+// one implementation, and it gates multer rather than following it.
 async function findOwnedTicketOr404(res: Response, id: number, requesterId: number) {
   const ticket = await getPrisma().ticket.findUnique({
     where: { id },
@@ -425,18 +441,34 @@ async function findOwnedTicketOr404(res: Response, id: number, requesterId: numb
   return ticket;
 }
 
-app.get("/api/tickets/:id", requireAuth, requirePasswordChanged, async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid ticket ID" });
+type OwnedTicket = NonNullable<Awaited<ReturnType<typeof findOwnedTicketOr404>>>;
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** Set by requireOwnedTicketParam once ownership is confirmed. */
+      ownedTicket?: OwnedTicket;
     }
+  }
+}
 
-    const ticket = await findOwnedTicketOr404(res, id, req.authUser!.id);
-    if (!ticket) return;
+async function requireOwnedTicketParam(req: Request, res: Response, next: NextFunction) {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid ticket ID" });
+  }
+  const ticket = await findOwnedTicketOr404(res, id, req.authUser!.id);
+  if (!ticket) return; // findOwnedTicketOr404 already sent the 404 response
+  req.ownedTicket = ticket;
+  next();
+}
 
+app.get("/api/tickets/:id", requireAuth, requirePasswordChanged, requireOwnedTicketParam, async (req: Request, res: Response) => {
+  try {
+    const ticket = req.ownedTicket!;
     const removedAttachments = await getPrisma().attachment.findMany({
-      where: { ticketId: id, isRemoved: true },
+      where: { ticketId: ticket.id, isRemoved: true },
       orderBy: { id: "asc" },
     });
 
@@ -447,15 +479,9 @@ app.get("/api/tickets/:id", requireAuth, requirePasswordChanged, async (req: Req
   }
 });
 
-app.patch("/api/tickets/:id", requireAuth, requirePasswordChanged, async (req: Request, res: Response) => {
+app.patch("/api/tickets/:id", requireAuth, requirePasswordChanged, requireOwnedTicketParam, async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid ticket ID" });
-    }
-
-    const owned = await findOwnedTicketOr404(res, id, req.authUser!.id);
-    if (!owned) return;
+    const id = req.ownedTicket!.id;
 
     const { summary, description, priority, categoryId, relatedSystemId } = req.body;
 
@@ -522,28 +548,21 @@ app.patch("/api/tickets/:id", requireAuth, requirePasswordChanged, async (req: R
   }
 });
 
-// Add attachment to existing ticket
+// Add attachment to existing ticket. requireOwnedTicketParam runs BEFORE
+// upload.array() (fixed in review): the previous order let multer write
+// files to disk ahead of the ownership check, so a non-owner repeatedly
+// POSTing to another user's ticket ID still left orphaned files on disk
+// under a 404 response. Ownership is now confirmed first, so multer's
+// disk-write middleware never runs for a request that will be rejected.
 app.post(
   "/api/tickets/:id/attachments",
   requireAuth,
   requirePasswordChanged,
+  requireOwnedTicketParam,
   upload.array("attachments", 5),
   async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        return res.status(400).json({ error: "Invalid ticket ID" });
-      }
-
-      const ticket = await getPrisma().ticket.findUnique({
-        where: { id },
-        include: { attachments: { where: { isRemoved: false } } },
-      });
-
-      if (!ticket || ticket.requesterId !== req.authUser!.id) {
-        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
-      }
-
+      const ticket = req.ownedTicket!;
       const files = (req.files as Express.Multer.File[]) || [];
       if (files.length === 0) {
         return res.status(400).json({ error: "No files provided" });
@@ -559,7 +578,7 @@ app.post(
         files.map((file) =>
           getPrisma().attachment.create({
             data: {
-              ticketId: id,
+              ticketId: ticket.id,
               fileName: file.originalname,
               fileUrl: `/uploads/${file.filename}`,
               fileSize: file.size,
@@ -583,26 +602,18 @@ app.delete(
   "/api/tickets/:id/attachments/:attachmentId",
   requireAuth,
   requirePasswordChanged,
+  requireOwnedTicketParam,
   async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const ticket = req.ownedTicket!;
       const attachmentId = parseInt(req.params.attachmentId, 10);
       const reason = req.body?.reason || "Removed by user";
-
-      if (isNaN(id) || isNaN(attachmentId)) {
+      if (isNaN(attachmentId)) {
         return res.status(400).json({ error: "Invalid parameters" });
       }
 
-      // Ownership check on the parent Ticket — the previous Lab 2 version
-      // only checked that the attachment belonged to the given ticket ID,
-      // with no check that the requester owned that ticket at all.
-      const ticket = await getPrisma().ticket.findUnique({ where: { id } });
-      if (!ticket || ticket.requesterId !== req.authUser!.id) {
-        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
-      }
-
       const attachment = await getPrisma().attachment.findFirst({
-        where: { id: attachmentId, ticketId: id },
+        where: { id: attachmentId, ticketId: ticket.id },
       });
 
       if (!attachment) {
@@ -632,25 +643,24 @@ app.delete(
 // Download an attachment. Added in I-4 — the Lab 2 client previously linked
 // directly to the static /uploads/<file> path, which enforced neither
 // ownership nor removal state despite the Lab 2 report describing 403/410
-// protection there; this endpoint actually provides it.
+// protection there. Fixed in review: an unauthenticated express.static
+// mount at /uploads was still live alongside this route, which would have
+// let anyone with a fileUrl bypass this endpoint entirely — that mount has
+// been removed, so this is now the only way to reach an attachment's file.
 app.get(
   "/api/tickets/:id/attachments/:attachmentId/download",
   requireAuth,
   requirePasswordChanged,
+  requireOwnedTicketParam,
   async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
+      const ticket = req.ownedTicket!;
       const attachmentId = parseInt(req.params.attachmentId, 10);
-      if (isNaN(id) || isNaN(attachmentId)) {
+      if (isNaN(attachmentId)) {
         return res.status(400).json({ error: "Invalid parameters" });
       }
 
-      const ticket = await getPrisma().ticket.findUnique({ where: { id } });
-      if (!ticket || ticket.requesterId !== req.authUser!.id) {
-        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
-      }
-
-      const attachment = await getPrisma().attachment.findFirst({ where: { id: attachmentId, ticketId: id } });
+      const attachment = await getPrisma().attachment.findFirst({ where: { id: attachmentId, ticketId: ticket.id } });
       if (!attachment) {
         return res.status(404).json({ error: { code: "NOT_FOUND", message: "Attachment not found." } });
       }

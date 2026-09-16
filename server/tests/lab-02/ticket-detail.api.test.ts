@@ -1,21 +1,28 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import type { Agent as SuperTestAgent } from 'supertest';
 import { app } from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
-import { loginAsRegressionRequester, REGRESSION_REQUESTER_EMAIL } from '../helpers/testAuth.js';
+import {
+  loginAsRegressionRequester,
+  loginAsRegressionOtherRequester,
+  REGRESSION_REQUESTER_EMAIL,
+} from '../helpers/testAuth.js';
 
 describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', () => {
   let sampleTicketId: number;
   let agent: SuperTestAgent;
   let requesterId: number;
-  let someoneElseAgent: SuperTestAgent | null = null;
-  let someoneElseId: number | null = null;
-  let someoneElseOriginalMustChangePassword = false;
+  let someoneElseAgent: SuperTestAgent;
 
   beforeAll(async () => {
     const prisma = getPrisma();
     agent = await loginAsRegressionRequester();
+    // Dedicated fixture, not a random real seeded Requester — see
+    // server/tests/helpers/testAuth.ts for why (avoids a cross-file
+    // parallelism race that previously made this suite intermittently
+    // flaky).
+    someoneElseAgent = await loginAsRegressionOtherRequester();
     const requester = await prisma.user.findUniqueOrThrow({ where: { email: REGRESSION_REQUESTER_EMAIL } });
     requesterId = requester.id;
 
@@ -32,16 +39,6 @@ describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', 
       },
     });
     sampleTicketId = ticket.id;
-  });
-
-  afterAll(async () => {
-    // Restore the "someone else" fixture's password-change state at the
-    // very end of the file, not mid-file — restoring it early left a
-    // later test hitting the requirePasswordChanged lockout (403) instead
-    // of the ownership check (404) it meant to exercise.
-    if (someoneElseId && someoneElseOriginalMustChangePassword) {
-      await getPrisma().user.update({ where: { id: someoneElseId }, data: { mustChangePassword: true } });
-    }
   });
 
   it('API-10: GET /api/tickets/:id returns full ticket detail with relations', async () => {
@@ -62,21 +59,6 @@ describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', 
   });
 
   it('API-10c: another Requester gets 404, not 403, for a Ticket they do not own (BR-32, AC-17)', async () => {
-    const prisma = getPrisma();
-    const someoneElse = await prisma.user.findFirstOrThrow({
-      where: { role: 'REQUESTER', isActive: true, email: { not: REGRESSION_REQUESTER_EMAIL } },
-    });
-    // Reuse the my-tickets suite's pattern: log in as a real seeded
-    // Requester, temporarily clearing mustChangePassword for the request.
-    someoneElseId = someoneElse.id;
-    someoneElseOriginalMustChangePassword = someoneElse.mustChangePassword;
-    if (someoneElseOriginalMustChangePassword) {
-      await prisma.user.update({ where: { id: someoneElse.id }, data: { mustChangePassword: false } });
-    }
-    someoneElseAgent = request.agent(app);
-    const loginRes = await someoneElseAgent.post('/api/auth/login').send({ email: someoneElse.email, password: 'ChangeMe123!' });
-    expect(loginRes.status).toBe(200);
-
     const res = await someoneElseAgent.get(`/api/tickets/${sampleTicketId}`);
     expect(res.status).toBe(404);
     expect(res.status).not.toBe(403);
@@ -93,6 +75,16 @@ describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', 
     expect(res.status).toBe(200);
     expect(res.body.summary).toBe('Updated Summary for In-Place Edit Test');
     expect(res.body.priority).toBe('Urgent');
+  });
+
+  it('API-11b: PATCH by a non-owner returns 404, not 403 (BR-32)', async () => {
+    const res = await someoneElseAgent.patch(`/api/tickets/${sampleTicketId}`).send({ summary: 'Should not apply' });
+    expect(res.status).toBe(404);
+  });
+
+  it('API-11c: an unauthenticated PATCH is rejected with 401 (FR-07)', async () => {
+    const res = await request(app).patch(`/api/tickets/${sampleTicketId}`).send({ summary: 'Should not apply' });
+    expect(res.status).toBe(401);
   });
 
   it('API-12: POST /api/tickets/:id/attachments uploads additional file to ticket', async () => {
@@ -116,9 +108,40 @@ describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', 
     const ownRes = await agent.get(`/api/tickets/${sampleTicketId}/attachments/${attachment.id}/download`);
     expect(ownRes.status).toBe(200);
 
-    expect(someoneElseAgent).not.toBeNull();
-    const otherRes = await someoneElseAgent!.get(`/api/tickets/${sampleTicketId}/attachments/${attachment.id}/download`);
+    const otherRes = await someoneElseAgent.get(`/api/tickets/${sampleTicketId}/attachments/${attachment.id}/download`);
     expect(otherRes.status).toBe(404);
+
+    const noAuthRes = await request(app).get(`/api/tickets/${sampleTicketId}/attachments/${attachment.id}/download`);
+    expect(noAuthRes.status).toBe(401);
+  });
+
+  it('API-12a2: an unauthenticated POST to attachments is rejected with 401 (FR-07)', async () => {
+    const res = await request(app)
+      .post(`/api/tickets/${sampleTicketId}/attachments`)
+      .attach('attachments', Buffer.from('irrelevant'), 'noauth.pdf');
+    expect(res.status).toBe(401);
+  });
+
+  it('API-12c: POST attachments by a non-owner returns 404 and writes no file to disk (BR-32)', async () => {
+    const beforeCount = (
+      await getPrisma().ticket.findUnique({
+        where: { id: sampleTicketId },
+        include: { attachments: { where: { isRemoved: false } } },
+      })
+    )!.attachments.length;
+
+    const res = await someoneElseAgent
+      .post(`/api/tickets/${sampleTicketId}/attachments`)
+      .attach('attachments', Buffer.from('Should never be written'), 'intrusion.pdf');
+    expect(res.status).toBe(404);
+
+    const afterCount = (
+      await getPrisma().ticket.findUnique({
+        where: { id: sampleTicketId },
+        include: { attachments: { where: { isRemoved: false } } },
+      })
+    )!.attachments.length;
+    expect(afterCount).toBe(beforeCount);
   });
 
   it('API-13: DELETE /api/tickets/:id/attachments/:attachmentId performs soft-removal', async () => {
@@ -130,6 +153,18 @@ describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', 
 
     const attachmentToDelete = ticket!.attachments[0];
     expect(attachmentToDelete).toBeDefined();
+
+    // API-13a: a non-owner cannot soft-remove it (404, not 403 — BR-32).
+    const forbiddenRes = await someoneElseAgent
+      .delete(`/api/tickets/${sampleTicketId}/attachments/${attachmentToDelete.id}`)
+      .send({ reason: 'Should not be permitted' });
+    expect(forbiddenRes.status).toBe(404);
+
+    // API-13a2: unauthenticated DELETE is rejected with 401 (FR-07).
+    const noAuthRes = await request(app)
+      .delete(`/api/tickets/${sampleTicketId}/attachments/${attachmentToDelete.id}`)
+      .send({ reason: 'Should not be permitted' });
+    expect(noAuthRes.status).toBe(401);
 
     const res = await agent
       .delete(`/api/tickets/${sampleTicketId}/attachments/${attachmentToDelete.id}`)
