@@ -1,5 +1,5 @@
 import { PrismaClient, Role, Priority, TicketStatus } from '@prisma/client';
-import bcrypt from 'bcryptjs';
+import { hashPassword } from '../src/utils/password.js';
 
 const prisma = new PrismaClient();
 
@@ -54,7 +54,7 @@ async function main() {
   // NEVER deleted/recreated: existing Ticket.requesterId FKs must keep
   // resolving to the same rows they always did.
   // ---------------------------------------------------------------------
-  const initialPasswordHash = bcrypt.hashSync(SEED_INITIAL_PASSWORD, 10);
+  const initialPasswordHash = hashPassword(SEED_INITIAL_PASSWORD);
 
   const requestersData = [
     { name: 'Jennifer Anderson', email: 'jennifer.anderson@toktick.internal', department: 'Finance', isActive: true },

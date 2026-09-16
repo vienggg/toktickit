@@ -30,22 +30,24 @@ Security/Authorization · Migration/Regression · End-to-End.
 
 | Test ID | Type | Requirement/AC | What It Tests | Expected Result | Automated Test File | Final |
 |---|---|---|---|---|---|---|
-| UNIT-01 | Unit | BR-12 | Password hash/verify round-trip | Hash never equals plaintext; verify succeeds only for correct password | `server/tests/lab-03/password.unit.test.ts` | |
-| UNIT-02 | Unit | BR-09 | Password policy validator | Rejects <8 chars, no letter, or no digit; accepts a compliant password | `server/tests/lab-03/password.unit.test.ts` | |
+| UNIT-01 | Unit | BR-12 | Password hash/verify round-trip | Hash never equals plaintext; verify succeeds only for correct password | `server/tests/lab-03/password.unit.test.ts` | Pass |
+| UNIT-02 | Unit | BR-09 | Password policy validator | Rejects <8 chars, no letter, or no digit; accepts a compliant password | `server/tests/lab-03/password.unit.test.ts` | Pass |
 | UNIT-03 | Unit | BR-19, §6.5 | Status transition matrix — all legal edges | Every ✅ cell in §6.5 returns permitted=true | `server/tests/lab-03/status-transitions.unit.test.ts` | |
 | UNIT-04 | Unit | BR-19, §6.5 | Status transition matrix — all illegal edges | Every non-✅ cell returns permitted=false with the correct permitted-set | `server/tests/lab-03/status-transitions.unit.test.ts` | |
-| API-01 | API | AC-01 | Valid login | 200, authenticated cookie set, safe user object (no hash) | `server/tests/lab-03/auth.api.test.ts` | |
-| API-02 | API | AC-05, BR-06 | Invalid credentials | 401, generic message, identical for wrong password and unknown email | `server/tests/lab-03/auth.api.test.ts` | |
-| API-03 | API | AC-06, BR-07 | Inactive account, correct password | 403, deactivation message | `server/tests/lab-03/auth.api.test.ts` | |
-| API-04 | API | AC-07, BR-08 | Logout | 204, cookie cleared, subsequent protected call returns 401; calling logout twice still 204 | `server/tests/lab-03/auth.api.test.ts` | |
-| API-05 | API | FR-03 | GET /api/auth/me | 200 with role and mustChangePassword; 401 unauthenticated | `server/tests/lab-03/auth.api.test.ts` | |
-| API-06 | API | AC-02, AC-14, BR-02, BR-10 | Change password (forced) | 200, mustChangePassword cleared; rejects reusing initial password; rejects mismatch | `server/tests/lab-03/auth.api.test.ts` | |
-| API-07 | API | AC-02, FR-04 | mustChangePassword lockout | Any non-allowlisted route returns 403 while true | `server/tests/lab-03/authorization.api.test.ts` | |
-| API-08 | API | AC-04, BR-24 | Requester requests Internal Notes | 403, empty body, no note content leaked | `server/tests/lab-03/authorization.api.test.ts` | |
-| API-09 | API | AC-03, BR-03 | Client-supplied requesterId ignored | Authenticated identity determines ownership regardless of body/query override | `server/tests/lab-03/authorization.api.test.ts` | |
-| API-10 | API | AC-17, BR-32 | Cross-requester ticket access | 404 (not 403), no existence confirmation | `server/tests/lab-03/authorization.api.test.ts` | |
-| API-11 | API | FR-07 | Unauthenticated access to any protected route | 401 across the route table | `server/tests/lab-03/authorization.api.test.ts` | |
-| API-12 | API | §6 matrix | Full role × endpoint authorization grid | Prints and asserts the matrix in `specification.md` §6 in one run | `server/tests/lab-03/authorization.api.test.ts` | |
+| API-01 | API | AC-01 | Valid login | 200, authenticated cookie set, safe user object (no hash) | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-02 | API | AC-05, BR-06 | Invalid credentials | 401, generic message, identical for wrong password and unknown email | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-03 | API | AC-06, BR-07 | Inactive account, correct password | 403, deactivation message | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-04 | API | AC-07, BR-08 | Logout | 204, cookie cleared, subsequent protected call returns 401; calling logout twice still 204 | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-05 | API | FR-03 | GET /api/auth/me | 200 with role and mustChangePassword; 401 unauthenticated | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-06 | API | AC-02, AC-14, BR-02, BR-10 | Change password (forced) | 200, mustChangePassword cleared; rejects reusing initial password; rejects mismatch | `server/tests/lab-03/auth.api.test.ts` | Pass |
+| API-07 | API | AC-02, FR-04 | mustChangePassword lockout | Any non-allowlisted route returns 403 while true | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| API-08 | API | AC-04, BR-24 | Requester requests Internal Notes | 403, empty body, no note content leaked | `server/tests/lab-03/comments-notes.api.test.ts` | *(I-7 — Internal Notes endpoint does not exist until then)* |
+| API-09 | API | AC-03, BR-03 | Client-supplied requesterId ignored | Authenticated identity determines ownership regardless of body/query override | `server/tests/lab-03/authorization.api.test.ts` | *(I-4 — Requester routes are not yet rewired to the session)* |
+| API-10 | API | AC-17, BR-32 | Cross-requester ticket access | 404 (not 403), no existence confirmation | `server/tests/lab-03/authorization.api.test.ts` | *(I-4)* |
+| API-11 | API | FR-07 | Unauthenticated access to any protected route | 401 across the route table | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| API-12 | API | §6 matrix | Full role × endpoint authorization grid | Prints and asserts the matrix in `specification.md` §6 in one run | `server/tests/lab-03/authorization.api.test.ts` | *(grows incrementally — full grid needs I-4/I-6/I-7/I-8 routes to exist; role-gate mechanism itself is covered now by API-21..23 below)* |
+| AUTHZ-01 | API | §6 matrix | requireRole middleware — permitted/rejected role behavior | Permitted role passes through; other role → 403 FORBIDDEN; no auth → 401 | `server/tests/lab-03/authorization.api.test.ts` | Pass |
+| AUTHZ-02 | Security | BR-07, FR-07 | Deactivation takes effect on next request, not at token expiry | A live session is rejected 403 the instant the account is deactivated | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | API-13 | API | AC-18 | Staff queue — search/filter/sort/pagination | Correct result sets per query; invalid param → 400 naming the field | `server/tests/lab-03/staff-queue.api.test.ts` | |
 | API-14 | API | FR-14 | Staff queue — role restriction | Requester → 403; IT Staff/Admin → 200 | `server/tests/lab-03/staff-queue.api.test.ts` | |
 | API-15 | API | AC-08, BR-13, BR-14 | Claim/reassign ownership | Owner set correctly; rejects an inactive or Requester-role ownerId | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |

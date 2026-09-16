@@ -16,7 +16,8 @@
 |---|---|---|---|:---:|
 | [#61](https://github.com/vienggg/toktickit/pull/61) | chore(lab3): Sprint 3 infrastructure setup | `chore/lab3-phase0-infra` | `lab3-staging` | Approved & Merged |
 | [#62](https://github.com/vienggg/toktickit/pull/62) | docs(lab3): Sprint 3 engineering contract | `docs/lab3-spec-and-test-plan` | `lab3-staging` | Approved & Merged |
-| — | I-2: Data model, migration, and seed | `feature/lab3-user-model-and-migration` | `lab3-staging` | Pending |
+| [#63](https://github.com/vienggg/toktickit/pull/63) | feat(lab3): data model, migration, and seed for Users, Roles, and Ticket workflow | `feature/lab3-user-model-and-migration` | `lab3-staging` | Approved & Merged |
+| — | I-3: Authentication foundation | `feature/lab3-auth-foundation` | `lab3-staging` | Pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
