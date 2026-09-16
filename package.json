@@ -1,5 +1,6 @@
 {
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "pdf-parse": "^2.4.5"
   }
 }
