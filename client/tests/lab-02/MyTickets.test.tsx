@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { DevRequesterProvider } from '../../src/context/DevRequesterContext';
+import { AuthProvider } from '../../src/context/AuthContext';
 import { MyTickets } from '../../src/components/MyTickets';
 
-const mockRequesters = [
-  { id: 1, name: 'Jennifer Anderson', email: 'jennifer.anderson@toktick.internal', department: 'Finance', isActive: true },
-];
+const mockUser = {
+  id: 1,
+  name: 'Jennifer Anderson',
+  email: 'jennifer.anderson@toktick.internal',
+  department: 'Finance',
+  role: 'REQUESTER',
+  mustChangePassword: false,
+};
 
 const mockTicketsResponse = {
   tickets: [
@@ -58,8 +63,8 @@ describe('My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05)'
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL) => {
       const urlStr = String(url);
-      if (urlStr.includes('/api/dev/requesters')) {
-        return { ok: true, json: async () => mockRequesters } as Response;
+      if (urlStr.includes('/api/auth/me')) {
+        return { ok: true, json: async () => ({ user: mockUser }) } as Response;
       }
       if (urlStr.includes('/api/categories')) {
         return { ok: true, json: async () => [{ id: 2, name: 'Hardware' }, { id: 4, name: 'Network' }] } as Response;
@@ -73,9 +78,9 @@ describe('My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05)'
 
   it('UI-04: renders ticket table with ticket numbers, status badges, priority badges, and pagination', async () => {
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <MyTickets />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -90,9 +95,9 @@ describe('My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05)'
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <MyTickets />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {

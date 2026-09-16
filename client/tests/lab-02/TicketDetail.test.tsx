@@ -1,12 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { DevRequesterProvider } from '../../src/context/DevRequesterContext';
+import { AuthProvider } from '../../src/context/AuthContext';
 import { TicketDetail } from '../../src/components/TicketDetail';
 
-const mockRequesters = [
-  { id: 1, name: 'Jennifer Anderson', email: 'jennifer.anderson@toktick.internal', department: 'Finance', isActive: true },
-];
+const mockUser = {
+  id: 1,
+  name: 'Jennifer Anderson',
+  email: 'jennifer.anderson@toktick.internal',
+  department: 'Finance',
+  role: 'REQUESTER',
+  mustChangePassword: false,
+};
 
 const mockTicketData = {
   id: 1,
@@ -43,8 +48,8 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: RequestInfo | URL, options?: RequestInit) => {
       const urlStr = String(url);
-      if (urlStr.includes('/api/dev/requesters')) {
-        return { ok: true, json: async () => mockRequesters } as Response;
+      if (urlStr.includes('/api/auth/me')) {
+        return { ok: true, json: async () => ({ user: mockUser }) } as Response;
       }
       if (urlStr.includes('/api/categories')) {
         return { ok: true, json: async () => [{ id: 4, name: 'Network' }] } as Response;
@@ -74,9 +79,9 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
 
   it('UI-06: renders ticket detail with metadata, requester box, and active attachments', async () => {
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <TicketDetail ticketId={1} onBack={() => {}} />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -89,9 +94,9 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
 
   it('UI-07: enters in-place edit mode, saves changes, and renders updated summary', async () => {
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <TicketDetail ticketId={1} onBack={() => {}} />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {
@@ -116,9 +121,9 @@ describe('Ticket Detail Screen, Attachment Lifecycle, and In-Place Edit (UI-06..
 
   it('UI-08: triggers attachment soft-removal confirmation modal and confirms deletion', async () => {
     render(
-      <DevRequesterProvider>
+      <AuthProvider>
         <TicketDetail ticketId={1} onBack={() => {}} />
-      </DevRequesterProvider>
+      </AuthProvider>
     );
 
     await waitFor(() => {

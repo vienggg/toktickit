@@ -1,27 +1,52 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
+import type { Agent as SuperTestAgent } from 'supertest';
 import { app } from '../../src/app.js';
 import { getPrisma } from '../../src/prisma.js';
+
+// This suite specifically needs Jennifer's real seeded ticket history
+// (>=12 tickets across a spread of statuses/priorities), so it logs in as
+// her rather than using the shared regression-fixture account. Her
+// mustChangePassword flag is temporarily cleared for the run and restored
+// afterward so the seed's own BR-02 guarantee (every seeded account starts
+// mustChangePassword=true) is left exactly as this suite found it.
+const JENNIFER_EMAIL = 'jennifer.anderson@toktick.internal';
+const JENNIFER_SEED_PASSWORD = 'ChangeMe123!'; // matches prisma/seed.ts SEED_INITIAL_PASSWORD
 
 describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
   let jenniferId: number;
   let sampleTicketNumber: string;
+  let agent: SuperTestAgent;
+  let originalMustChangePassword: boolean;
 
   beforeAll(async () => {
-    const jennifer = await getPrisma().user.findFirst({
-      where: { email: 'jennifer.anderson@toktick.internal' },
-    });
-    jenniferId = jennifer!.id;
+    const prisma = getPrisma();
+    const jennifer = await prisma.user.findFirstOrThrow({ where: { email: JENNIFER_EMAIL } });
+    jenniferId = jennifer.id;
+    originalMustChangePassword = jennifer.mustChangePassword;
 
-    const sampleTicket = await getPrisma().ticket.findFirst({
-      where: { requesterId: jenniferId },
-    });
+    if (originalMustChangePassword) {
+      await prisma.user.update({ where: { id: jenniferId }, data: { mustChangePassword: false } });
+    }
+
+    agent = request.agent(app);
+    const loginRes = await agent.post('/api/auth/login').send({ email: JENNIFER_EMAIL, password: JENNIFER_SEED_PASSWORD });
+    if (loginRes.status !== 200) {
+      throw new Error(`Failed to log in as Jennifer for regression tests: ${loginRes.status} ${JSON.stringify(loginRes.body)}`);
+    }
+
+    const sampleTicket = await prisma.ticket.findFirst({ where: { requesterId: jenniferId } });
     sampleTicketNumber = sampleTicket!.ticketNumber;
   });
 
-  it('API-06: returns paginated tickets strictly filtered by requesterId', async () => {
-    const res = await request(app)
-      .get(`/api/tickets?requesterId=${jenniferId}&page=1&limit=5`);
+  afterAll(async () => {
+    if (originalMustChangePassword) {
+      await getPrisma().user.update({ where: { id: jenniferId }, data: { mustChangePassword: true } });
+    }
+  });
+
+  it('API-06: returns paginated tickets strictly scoped to the authenticated session (BR-03)', async () => {
+    const res = await agent.get('/api/tickets?page=1&limit=5');
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('tickets');
@@ -37,9 +62,13 @@ describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
     expect(allBelongToJennifer).toBe(true);
   });
 
+  it('API-06b: an unauthenticated request is rejected with 401, not given an empty list (FR-07)', async () => {
+    const res = await request(app).get('/api/tickets?page=1&limit=5');
+    expect(res.status).toBe(401);
+  });
+
   it('API-07: searches tickets by summary and ticketNumber', async () => {
-    const res = await request(app)
-      .get(`/api/tickets?requesterId=${jenniferId}&search=${sampleTicketNumber}`);
+    const res = await agent.get(`/api/tickets?search=${sampleTicketNumber}`);
 
     expect(res.status).toBe(200);
     expect(res.body.tickets.length).toBeGreaterThan(0);
@@ -47,8 +76,7 @@ describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
   });
 
   it('API-08: filters tickets by status and priority', async () => {
-    const res = await request(app)
-      .get(`/api/tickets?requesterId=${jenniferId}&status=New&priority=High`);
+    const res = await agent.get('/api/tickets?status=New&priority=High');
 
     expect(res.status).toBe(200);
     const matchesFilter = res.body.tickets.every(
@@ -59,12 +87,10 @@ describe('GET /api/tickets (API-06, API-07, API-08, API-09)', () => {
   });
 
   it('API-09: sorts tickets by createdAt ascending and descending', async () => {
-    const resDesc = await request(app)
-      .get(`/api/tickets?requesterId=${jenniferId}&sort=createdAt:desc`);
+    const resDesc = await agent.get('/api/tickets?sort=createdAt:desc');
     expect(resDesc.status).toBe(200);
 
-    const resAsc = await request(app)
-      .get(`/api/tickets?requesterId=${jenniferId}&sort=createdAt:asc`);
+    const resAsc = await agent.get('/api/tickets?sort=createdAt:asc');
     expect(resAsc.status).toBe(200);
 
     if (resDesc.body.tickets.length >= 2 && resAsc.body.tickets.length >= 2) {

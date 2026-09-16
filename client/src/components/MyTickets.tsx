@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useDevRequester } from '../context/DevRequesterContext';
+import { useAuth } from '../context/AuthContext';
+import { apiFetch } from '../api';
 
 export interface TicketSummaryItem {
   id: number;
@@ -37,7 +38,7 @@ interface MyTicketsProps {
 }
 
 export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigateToCreate }) => {
-  const { currentRequester, setIsModalOpen } = useDevRequester();
+  const { user } = useAuth();
 
   const [tickets, setTickets] = useState<TicketSummaryItem[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta>({
@@ -76,7 +77,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
     const controller = new AbortController();
     async function loadCategories() {
       try {
-        const res = await fetch('/api/categories', { signal: controller.signal });
+        const res = await apiFetch('/api/categories', { signal: controller.signal });
         if (res.ok) {
           const data: CategoryOption[] = await res.json();
           setCategories(data);
@@ -92,14 +93,11 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
   }, []);
 
   const fetchTickets = useCallback(async (signal?: AbortSignal) => {
-    if (!currentRequester) return;
-
     setIsLoading(true);
     setError(null);
 
     try {
       const params = new URLSearchParams({
-        requesterId: String(currentRequester.id),
         page: String(page),
         limit: String(limit),
         sort,
@@ -110,7 +108,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
       if (categoryId !== 'All') params.append('categoryId', categoryId);
       if (priority !== 'All') params.append('priority', priority);
 
-      const res = await fetch(`/api/tickets?${params.toString()}`, { signal });
+      const res = await apiFetch(`/api/tickets?${params.toString()}`, { signal });
       if (!res.ok) {
         throw new Error(`Failed to fetch tickets (HTTP ${res.status})`);
       }
@@ -132,7 +130,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
     } finally {
       setIsLoading(false);
     }
-  }, [currentRequester, page, limit, debouncedSearch, status, categoryId, priority, sort]);
+  }, [page, limit, debouncedSearch, status, categoryId, priority, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -202,7 +200,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
           <div>
             <h4 className="mb-0 fw-bold">📋 My Support Tickets</h4>
             <small className="opacity-75">
-              Viewing tickets for <strong>{currentRequester?.name}</strong> ({currentRequester?.department})
+              Viewing tickets for <strong>{user?.name}</strong> ({user?.department})
             </small>
           </div>
           <button

@@ -57,6 +57,7 @@ declare global {
         id: number;
         name: string;
         email: string;
+        department: string;
         role: Role;
         isActive: boolean;
         mustChangePassword: boolean;
@@ -101,6 +102,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     id: user.id,
     name: user.name,
     email: user.email,
+    // Fixed in review: this was missing department, so GET /api/auth/me
+    // (which returns req.authUser verbatim) silently dropped it on every
+    // call except the one right after login (whose response is built from
+    // safeUser() in app.ts, not requireAuth). Every client test happened
+    // to hand-mock /api/auth/me with department already present, which is
+    // why this didn't surface in the test suite.
+    department: user.department,
     role: user.role,
     isActive: user.isActive,
     mustChangePassword: user.mustChangePassword,

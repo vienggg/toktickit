@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
-import { DevRequesterProvider } from './context/DevRequesterContext';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
+import { RequireAuth, RedirectIfAuthenticated } from './components/ProtectedRoute';
 import { Navbar } from './components/Navbar';
-import { DevRequesterModal } from './components/DevRequesterModal';
+import { Login } from './components/Login';
+import { ChangePassword } from './components/ChangePassword';
 import { CreateTicket } from './components/CreateTicket';
 import { MyTickets } from './components/MyTickets';
 import { TicketDetail } from './components/TicketDetail';
 
-function MainContent() {
+function RequesterWorkspace() {
   const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
 
@@ -18,7 +21,6 @@ function MainContent() {
   return (
     <div className="min-vh-100 d-flex flex-column" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
       <Navbar currentView={activeTab} setCurrentView={setActiveTab} />
-      <DevRequesterModal />
 
       <main className="container py-4 flex-grow-1">
         {activeTab === 'create' && <CreateTicket />}
@@ -47,8 +49,35 @@ function MainContent() {
 
 export default function App() {
   return (
-    <DevRequesterProvider>
-      <MainContent />
-    </DevRequesterProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <RedirectIfAuthenticated>
+                <Login />
+              </RedirectIfAuthenticated>
+            }
+          />
+          <Route
+            path="/change-password"
+            element={
+              <RequireAuth>
+                <ChangePassword />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/*"
+            element={
+              <RequireAuth>
+                <RequesterWorkspace />
+              </RequireAuth>
+            }
+          />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

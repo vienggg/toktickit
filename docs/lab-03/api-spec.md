@@ -61,9 +61,9 @@ derived exclusively from the session (BR-03, FR-08).
 | `POST` | `/api/tickets` | Creates a Ticket owned by the authenticated Requester. |
 | `GET` | `/api/tickets/:id` | 404 if the Ticket does not belong to the authenticated Requester (BR-32) — not 403. |
 | `PATCH` | `/api/tickets/:id` | Edits summary/description/priority before IT triage; 404 if not owned. |
-| `POST` | `/api/tickets/:id/attachments` | Unchanged from Lab 2, ownership-scoped. |
-| `DELETE` | `/api/tickets/:id/attachments/:attId` | Soft-removal, unchanged from Lab 2, ownership-scoped. |
-| `GET` | `/api/tickets/:id/attachments/:attId/download` | Unchanged from Lab 2, ownership-scoped. |
+| `POST` | `/api/tickets/:id/attachments` | Now requires authentication and an ownership check (404 if not owned) — Lab 2 only checked the ticket existed, not who owned it. |
+| `DELETE` | `/api/tickets/:id/attachments/:attId` | Soft-removal. **Correction:** Lab 2's version had no ownership check on the parent Ticket at all (only that the attachment belonged to the given ticket ID); this is now closed. |
+| `GET` | `/api/tickets/:id/attachments/:attId/download` | **New in I-4.** Lab 2 never actually had this endpoint — the client linked directly to the static `/uploads/<file>` path, which enforced neither ownership nor removal state despite the Lab 2 report describing 403/410 protection there. This route provides it for real: 404 if the Ticket is not owned, 410 if the attachment is soft-removed, otherwise streams the file. |
 
 ### `POST /api/tickets/:id/resolution-signal`
 Requester only, must own the Ticket. No body. 200 → sets `requesterResolvedAt`

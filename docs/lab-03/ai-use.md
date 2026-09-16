@@ -22,6 +22,8 @@ adversarial review of the sprint plan before implementation began).
 | 7 | `continue` / `go on` / `ok` | Used to advance through Phase 0 execution steps (branch creation, dependency installs, Playwright setup, database backup, migration baseline) one confirmed step at a time. |
 | 8 | `you decide and do everything you only ask me when it deal with gh` | Directed the assistant to execute I-2 (data model, migration, seed) end-to-end without per-step confirmation, reserving approval only for GitHub-visible actions. During execution the assistant discovered and independently resolved a real infrastructure bug: two Postgres servers both listening on port 5432 (a stale Docker container and the real WSL-hosted database), which had caused the Phase 0 backup and every `prisma migrate` bookkeeping call to silently target the wrong database. |
 | 9 | `continue` | Used to move from I-2 into I-3 (authentication foundation): login/logout/me/change-password endpoints, the requireAuth/requirePasswordChanged/requireRole middleware, cookie-based sessions, and the corresponding test suites — again executed end-to-end under the GitHub-only approval gate. |
+| 10 | `continue` | Used to move from I-3 into I-4 (auth UI, routing, Requester regression) — the sprint's largest issue. Wired requireAuth/requirePasswordChanged onto every existing Lab 2 route, removed the client-supplied requesterId contract, built the Login/ChangePassword screens and react-router route guards, deleted the Dev Requester selector, and rewrote all 6 existing server test files plus 5 client test files from `?requesterId=` to cookie-based auth. Also discovered and closed a real pre-existing security gap: the Lab 2 attachment "download" was a raw static-file link with no ownership or removal-state enforcement at all, despite the Lab 2 report describing 403/410 protection there — added a real checked download endpoint. |
+| 11 | `my friend did request change go fix it` | Worked through all 9 findings from @projectnewy's Changes Requested review of PR #65 on the same branch (never opening a new PR, per the project's own workflow rules). Three were genuinely blocking: an unauthenticated static file mount left the exact ownership/removal gap the PR claimed to fix still open; the ownership check was duplicated across 3 routes instead of using the existing helper; and multer wrote attachment files to disk before the ownership check ran, so a rejected non-owner upload still left orphaned files. Consolidated all five ticket-scoped routes onto one `requireOwnedTicketParam` middleware, which incidentally fixed the disk-write-ordering bug as a side effect of fixing the duplication. Also added the missing non-owner and 401 test coverage the review flagged, replaced a shared-mutable-seeded-user test fixture that could race under parallel test execution with a second dedicated fixture, and corrected a `tests.md` claim that overstated existing coverage. |
 
 *(A GitHub personal access token was pasted into chat during this sprint. It
 was not used for any operation — entering API keys/tokens is a hard rule the
@@ -72,3 +74,19 @@ determine which database was real, then redid the Phase 0 backup and the
 already-applied migration bookkeeping against the correct one before
 continuing. That is exactly the kind of infrastructure assumption I would want
 checked rather than silently trusted.
+
+**On I-4 specifically:** the assistant made a real mistake mid-issue — it
+created `client/src/api.ts` for a new fetch helper without first checking
+whether that path already existed, silently overwriting a genuine Lab 1
+file (`checkSystem()`) that a passing test still depended on. It was caught
+immediately because `tsc` and the test suite both failed loudly, and the fix
+was to merge the new helper into the original file rather than re-deleting
+history. The lesson I'd draw: an agent creating a "new" file should still
+check for a collision first, the same discipline it already applies to
+editing an existing one. Separately, building the ownership rewiring
+surfaced a real, pre-existing gap worth flagging on its own — the Lab 2
+attachment "download" link was never actually access-controlled, just a
+raw static file path, contradicting what the Lab 2 report claims about
+403/410 protection. That's now fixed with a real endpoint, but it's a good
+example of documentation asserting a security property that the code never
+actually enforced.
