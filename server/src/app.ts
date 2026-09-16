@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
-import { Prisma, TicketStatus, Priority } from "@prisma/client";
+import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
 import {
   requireAuth,
   requirePasswordChanged,
@@ -778,6 +778,178 @@ app.post(
     } catch (err) {
       console.error("Create ticket error:", err);
       return res.status(500).json({ error: "Failed to create ticket" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-5) — Public Comments and the Requester resolution signal
+// ---------------------------------------------------------------------------
+
+// BR-04: Public Comments are visible to the Requester (own Ticket only), IT
+// Staff, and Administrator. A Requester who does not own the Ticket gets 404
+// (BR-32) — the IT Staff/Administrator staff-side UI (I-6/I-7) reuses this
+// same endpoint against any Ticket, so only the Requester path is
+// ownership-scoped here.
+async function findVisibleTicketOr404(res: Response, id: number, authUser: NonNullable<Request["authUser"]>) {
+  const ticket = await getPrisma().ticket.findUnique({ where: { id } });
+  if (!ticket) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    return null;
+  }
+  if (authUser.role === Role.REQUESTER && ticket.requesterId !== authUser.id) {
+    // BR-32 masking applies here too: a Requester gets the identical 404 a
+    // missing Ticket would produce, not a 403 that confirms it exists.
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    return null;
+  }
+  return ticket;
+}
+
+type VisibleTicket = NonNullable<Awaited<ReturnType<typeof findVisibleTicketOr404>>>;
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      visibleTicket?: VisibleTicket;
+    }
+  }
+}
+
+async function requireTicketVisibleToUser(req: Request, res: Response, next: NextFunction) {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) {
+    return res.status(400).json({ error: "Invalid ticket ID" });
+  }
+  const ticket = await findVisibleTicketOr404(res, id, req.authUser!);
+  if (!ticket) return;
+  req.visibleTicket = ticket;
+  next();
+}
+
+function validateCommentBody(body: unknown): string | null {
+  if (typeof body !== "string") return null;
+  const trimmed = body.trim();
+  if (trimmed.length === 0 || trimmed.length > 2000) return null;
+  return trimmed;
+}
+
+app.get(
+  "/api/tickets/:id/comments",
+  requireAuth,
+  requirePasswordChanged,
+  requireTicketVisibleToUser,
+  async (req: Request, res: Response) => {
+    try {
+      const comments = await getPrisma().publicComment.findMany({
+        where: { ticketId: req.visibleTicket!.id },
+        include: { author: { select: { id: true, name: true, role: true } } },
+        orderBy: { createdAt: "asc" },
+      });
+      return res.status(200).json(
+        comments.map((c) => ({
+          id: c.id,
+          ticketId: c.ticketId,
+          authorId: c.authorId,
+          authorName: c.author.name,
+          authorRole: c.author.role,
+          body: c.body,
+          createdAt: c.createdAt,
+        }))
+      );
+    } catch (err) {
+      console.error("List comments error:", err);
+      return res.status(500).json({ error: "Failed to fetch comments" });
+    }
+  }
+);
+
+app.post(
+  "/api/tickets/:id/comments",
+  requireAuth,
+  requirePasswordChanged,
+  requireTicketVisibleToUser,
+  async (req: Request, res: Response) => {
+    try {
+      // BR-23: empty/whitespace-only rejected, 1-2000 chars.
+      const body = validateCommentBody(req.body?.body);
+      if (body === null) {
+        return res.status(400).json({
+          error: { code: "VALIDATION_ERROR", message: "Comment must be between 1 and 2000 characters." },
+        });
+      }
+
+      // BR-22: author and timestamp are server-set, never trusted from the client.
+      const comment = await getPrisma().publicComment.create({
+        data: { ticketId: req.visibleTicket!.id, authorId: req.authUser!.id, body },
+        include: { author: { select: { id: true, name: true, role: true } } },
+      });
+
+      return res.status(201).json({
+        id: comment.id,
+        ticketId: comment.ticketId,
+        authorId: comment.authorId,
+        authorName: comment.author.name,
+        authorRole: comment.author.role,
+        body: comment.body,
+        createdAt: comment.createdAt,
+      });
+    } catch (err) {
+      console.error("Create comment error:", err);
+      return res.status(500).json({ error: "Failed to post comment" });
+    }
+  }
+);
+
+// BR-05, D-10: a Requester may indicate a problem appears resolved, but this
+// is a flag plus an auto-generated Public Comment — never a status change.
+// A client sending a status field alongside this call has no effect; there
+// is no status field in this route's contract at all.
+const RESOLUTION_SIGNAL_BLOCKED_STATUSES: TicketStatus[] = [
+  TicketStatus.RESOLVED,
+  TicketStatus.CLOSED,
+  TicketStatus.CANCELLED,
+];
+
+app.post(
+  "/api/tickets/:id/resolution-signal",
+  requireAuth,
+  requirePasswordChanged,
+  requireOwnedTicketParam,
+  async (req: Request, res: Response) => {
+    try {
+      const ticket = req.ownedTicket!;
+      if (RESOLUTION_SIGNAL_BLOCKED_STATUSES.includes(ticket.status)) {
+        return res.status(409).json({
+          error: {
+            code: "TICKET_ALREADY_TERMINAL",
+            message: "This ticket is already resolved, closed, or cancelled.",
+          },
+        });
+      }
+
+      const [updated] = await getPrisma().$transaction([
+        getPrisma().ticket.update({
+          where: { id: ticket.id },
+          data: { requesterResolvedAt: new Date() },
+        }),
+        getPrisma().publicComment.create({
+          data: {
+            ticketId: ticket.id,
+            authorId: req.authUser!.id,
+            body: "The Requester has indicated that this problem appears resolved.",
+          },
+        }),
+      ]);
+
+      return res.status(200).json({
+        id: updated.id,
+        requesterResolvedAt: updated.requesterResolvedAt,
+      });
+    } catch (err) {
+      console.error("Resolution signal error:", err);
+      return res.status(500).json({ error: "Failed to record resolution signal" });
     }
   }
 );

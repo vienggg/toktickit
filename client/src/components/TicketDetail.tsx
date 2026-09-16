@@ -19,7 +19,7 @@ interface TicketDetailData {
   summary: string;
   description: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
-  status: 'New' | 'In Progress' | 'Resolved' | 'Closed';
+  status: string;
   categoryId: number;
   category: { id: number; name: string };
   relatedSystemId?: number | null;
@@ -28,9 +28,24 @@ interface TicketDetailData {
   requester: { id: number; name: string; email: string; department: string };
   attachments: Attachment[];
   removedAttachments?: Attachment[];
+  requesterResolvedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+interface PublicCommentData {
+  id: number;
+  ticketId: number;
+  authorId: number;
+  authorName: string;
+  authorRole: string;
+  body: string;
+  createdAt: string;
+}
+
+// Terminal statuses where "Problem Appears Resolved" no longer applies —
+// mirrors the server's RESOLUTION_SIGNAL_BLOCKED_STATUSES (BR-05).
+const RESOLUTION_TERMINAL_STATUSES = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'CANCELLED'];
 
 interface CategoryOption {
   id: number;
@@ -71,6 +86,29 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   const [removalReason, setRemovalReason] = useState<string>('');
   const [targetAttachmentToRemove, setTargetAttachmentToRemove] = useState<Attachment | null>(null);
 
+  // Public Comments state
+  const [comments, setComments] = useState<PublicCommentData[]>([]);
+  const [newComment, setNewComment] = useState<string>('');
+  const [isPostingComment, setIsPostingComment] = useState<boolean>(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+
+  // "Problem Appears Resolved" state
+  const [isSignalingResolution, setIsSignalingResolution] = useState<boolean>(false);
+  const [resolutionSignalError, setResolutionSignalError] = useState<string | null>(null);
+
+  const fetchComments = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}/comments`, { signal });
+      if (res.ok) {
+        setComments(await res.json());
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        console.error('Failed to load comments:', err);
+      }
+    }
+  }, [ticketId]);
+
   const fetchTicketDetail = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
     setIsLoading(true);
     setError(null);
@@ -102,6 +140,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   useEffect(() => {
     const controller = new AbortController();
     fetchTicketDetail(false, controller.signal);
+    fetchComments(controller.signal);
 
     // Load category and system lists
     async function loadRef() {
@@ -120,7 +159,55 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     }
     loadRef();
     return () => controller.abort();
-  }, [fetchTicketDetail]);
+  }, [fetchTicketDetail, fetchComments]);
+
+  const handlePostComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCommentError(null);
+    const trimmed = newComment.trim();
+    if (!trimmed) {
+      setCommentError('Comment cannot be empty.');
+      return;
+    }
+    if (trimmed.length > 2000) {
+      setCommentError('Comment cannot exceed 2000 characters.');
+      return;
+    }
+
+    setIsPostingComment(true);
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: trimmed }),
+      });
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, 'Failed to post comment'));
+      }
+      setNewComment('');
+      await fetchComments();
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : 'Failed to post comment');
+    } finally {
+      setIsPostingComment(false);
+    }
+  };
+
+  const handleSignalResolution = async () => {
+    setResolutionSignalError(null);
+    setIsSignalingResolution(true);
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}/resolution-signal`, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, 'Failed to record your response'));
+      }
+      await Promise.all([fetchTicketDetail(isEditing), fetchComments()]);
+    } catch (err) {
+      setResolutionSignalError(err instanceof Error ? err.message : 'Failed to record your response');
+    } finally {
+      setIsSignalingResolution(false);
+    }
+  };
 
   const handleStartEdit = () => {
     if (!ticket) return;
@@ -661,6 +748,89 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* PUBLIC COMMENTS (I-5) — visible to Requester, IT Staff, and
+              Administrator (BR-04); background matches the page canvas
+              per ui-spec.md §1, distinguishing it from the Internal Notes
+              panel IT Staff will see in I-7. */}
+          <div className="mt-4 pt-4 border-top">
+            <h6 className="fw-bold text-dark mb-3">💬 Public Comments</h6>
+
+            {comments.length === 0 && (
+              <p className="text-muted small mb-3">No comments yet on this ticket.</p>
+            )}
+
+            {comments.length > 0 && (
+              <div className="d-flex flex-column gap-2 mb-3">
+                {comments.map((c) => (
+                  <div
+                    key={c.id}
+                    className="p-3 rounded border"
+                    style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)' }}
+                  >
+                    <div className="d-flex justify-content-between align-items-center mb-1">
+                      <span className="fw-semibold text-dark small">{c.authorName}</span>
+                      <span className="text-muted small">{formatDate(c.createdAt)}</span>
+                    </div>
+                    <div className="text-dark" style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {commentError && <div className="alert alert-danger small py-2 mb-3">{commentError}</div>}
+
+            <form onSubmit={handlePostComment}>
+              <label htmlFor="new-comment" className="form-label small fw-semibold text-dark">
+                Add a comment
+              </label>
+              <textarea
+                id="new-comment"
+                className="form-control mb-2"
+                rows={2}
+                maxLength={2000}
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                disabled={isPostingComment}
+                placeholder="Share an update or ask a question..."
+              />
+              <div className="d-flex justify-content-end">
+                <button
+                  type="submit"
+                  className="btn btn-zen-primary btn-sm px-3"
+                  disabled={isPostingComment || !newComment.trim()}
+                >
+                  {isPostingComment ? 'Posting...' : 'Post Comment'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* PROBLEM APPEARS RESOLVED (I-5, BR-05) — a Requester may
+              indicate resolution but cannot formally close the ticket;
+              hidden once the ticket has reached a terminal status, and
+              replaced with a confirmation note once used. */}
+          <div className="mt-4 pt-4 border-top">
+            {resolutionSignalError && (
+              <div className="alert alert-danger small py-2 mb-3">{resolutionSignalError}</div>
+            )}
+            {ticket.requesterResolvedAt ? (
+              <p className="text-success small mb-0">
+                ✅ You indicated this problem appears resolved on {formatDate(ticket.requesterResolvedAt)}.
+              </p>
+            ) : (
+              !RESOLUTION_TERMINAL_STATUSES.includes(ticket.status) && (
+                <button
+                  type="button"
+                  className="btn btn-zen-outline btn-sm"
+                  onClick={handleSignalResolution}
+                  disabled={isSignalingResolution}
+                >
+                  {isSignalingResolution ? 'Recording...' : '✅ Problem Appears Resolved'}
+                </button>
+              )
             )}
           </div>
         </div>
