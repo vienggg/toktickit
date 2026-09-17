@@ -51,8 +51,10 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-12 | API | §6 matrix | Full role × endpoint authorization grid | Prints and asserts the matrix in `specification.md` §6 in one run | `server/tests/lab-03/authorization.api.test.ts` | *(grows incrementally — full grid needs I-4/I-6/I-7/I-8 routes to exist; role-gate mechanism itself is covered now by API-21..23 below)* |
 | AUTHZ-01 | API | §6 matrix | requireRole middleware — permitted/rejected role behavior | Permitted role passes through; other role → 403 FORBIDDEN; no auth → 401 | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | AUTHZ-02 | Security | BR-07, FR-07 | Deactivation takes effect on next request, not at token expiry | A live session is rejected 403 the instant the account is deactivated | `server/tests/lab-03/authorization.api.test.ts` | Pass |
-| API-13 | API | AC-18 | Staff queue — search/filter/sort/pagination | Correct result sets per query; invalid param → 400 naming the field | `server/tests/lab-03/staff-queue.api.test.ts` | |
-| API-14 | API | FR-14 | Staff queue — role restriction | Requester → 403; IT Staff/Admin → 200 | `server/tests/lab-03/staff-queue.api.test.ts` | |
+| API-13 | API | AC-18 | Staff queue — search/filter/sort/pagination | Correct result sets per query; invalid param → 400 naming the field | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-13n | API | AC-18 (added in review of PR #67 — item 3: `page` had no upper bound, only `pageSize` did) | Staff queue — huge page number | An absurdly large `page` (e.g. `99999999999999999999`) returns 400 naming `page`, not an unhandled 500 from an oversized Prisma `skip` | `server/tests/lab-03/staff-queue.api.test.ts` (API-13n) | Pass |
+| API-14 | API | FR-14 | Staff queue — role restriction | Requester → 403; IT Staff/Admin → 200 | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
+| API-28 | API | AC-18 (added in review of PR #67 — item 2: no endpoint listed staff for the Owner filter picker) | `GET /api/staff/members` roster | Returns active IT_STAFF/ADMINISTRATOR users as `[{ id, name }]` ordered by name; Requester → 403; unauthenticated → 401 | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
 | API-15 | API | AC-08, BR-13, BR-14 | Claim/reassign ownership | Owner set correctly; rejects an inactive or Requester-role ownerId | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |
 | API-16 | API | BR-16 | Set IT Priority | Updates independently of Requested Priority; role-restricted | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |
 | API-17 | API | AC-09, BR-17, BR-19 | Status transition enforcement | Legal transition succeeds; illegal → 409 with permitted set; IN_PROGRESS blocked while unassigned | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |
@@ -76,9 +78,11 @@ Security/Authorization · Migration/Regression · End-to-End.
 |---|---|---|---|---|---|---|
 | UI-01 | UI Component | AC-01, AC-05 | Login form | Valid submit calls API and redirects; invalid shows generic error; busy state disables button | `client/tests/lab-03/Login.test.tsx` | Pass |
 | UI-02 | UI Component | AC-02, BR-09, BR-11 | Change Password form | Validates policy and confirmation client-side; submits and redirects on success | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
-| UI-03 | UI Component | FR-14 | Staff Queue rendering | Renders rows with correct badges; empty and no-results states render correctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | |
-| UI-04 | UI Style | §1 (ui-spec) | Status/role badge colors | Correct token applied per status/role value | `client/tests/lab-03/StaffTicketQueue.test.tsx` | |
-| UI-05 | Responsive | §9 (ui-spec) | Queue table → card collapse | Mobile viewport renders card layout, not the desktop table | `client/tests/lab-03/StaffTicketQueue.test.tsx` | |
+| UI-03 | UI Component | FR-14 | Staff Queue rendering | Renders rows with correct badges; empty and no-results states render correctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| UI-04 | UI Style | §1 (ui-spec) | Status/role badge colors | Correct token applied per status/role value; owner name vs. Unassigned pill | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| UI-05 | Responsive | §9 (ui-spec) | Queue table → card collapse | Card layout markup present alongside the desktop table (Bootstrap breakpoint classes; jsdom does not evaluate CSS media queries, so this asserts markup, not computed layout) | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| UI-03e | UI Component | FR-14 (added in review of PR #67 — item 1: "Open" navigated to a route App.tsx never defines, and no test caught it) | Queue "Open" action | Clicking a row's Open button opens a read-only modal populated with that row's already-fetched data (summary, description, category, priorities, status, owner, requester, dates); Close dismisses it | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-1) | Pass |
+| UI-03f | UI Component | AC-18 (added in review of PR #67 — item 2: Owner filter only offered All/Unassigned) | Queue Owner picker | Picker is populated from `GET /api/staff/members`; selecting a specific staff member sends the matching `ownerId` query param | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-2) | Pass |
 | UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | |
 | UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | |
 | UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | |
@@ -137,6 +141,19 @@ Captured 2026-09-16 against the corrected pre-Lab-3 database, backed up to
 | RelatedSystem | 7 |
 | Ticket | 15 |
 | Attachment | 5 |
+
+**Note (I-6, 2026-09-17):** `staff-queue.api.test.ts` could not initially be
+run end-to-end because the Docker `db` container had drifted back onto host
+port 5432 (colliding with the real WSL-hosted Postgres, the same class of
+issue first diagnosed during I-2 — see the row counts above), which made the
+reachable `localhost:5432` connection land on an unrelated, unmigrated
+database. Recreating the container restored the correct `5433` mapping from
+`docker-compose.yml`, after which an orphaned, never-finished
+`_prisma_migrations` bookkeeping row (`20260812121902_init`, predating the
+current `0_init`–`4_add_comments_and_notes` sequence) was cleared with `npx
+prisma migrate resolve --rolled-back` — a bookkeeping-only fix, no schema or
+data change. All 99 server tests, including the 17 in
+`staff-queue.api.test.ts`, then passed.
 
 REGR-01 asserts these counts are unchanged after the full `0_init` →
 `4_add_comments_and_notes` migration sequence, and that every `Ticket.requesterId`

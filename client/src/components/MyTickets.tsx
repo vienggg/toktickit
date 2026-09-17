@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch } from '../api';
+import { apiFetch, parseApiError } from '../api';
+import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, formatDate } from '../hooks/usePaginatedFetch';
 
 export interface TicketSummaryItem {
   id: number;
@@ -27,36 +28,33 @@ interface PaginationMeta {
   hasPrev: boolean;
 }
 
-interface CategoryOption {
-  id: number;
-  name: string;
-}
+const DEFAULT_PAGINATION: PaginationMeta = {
+  page: 1,
+  limit: 10,
+  totalItems: 0,
+  totalPages: 1,
+  hasNext: false,
+  hasPrev: false,
+};
 
 interface MyTicketsProps {
   onSelectTicket?: (ticketId: number) => void;
   onNavigateToCreate?: () => void;
 }
 
+interface TicketsPage {
+  tickets: TicketSummaryItem[];
+  pagination: PaginationMeta;
+}
+
 export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigateToCreate }) => {
   const { user } = useAuth();
 
-  const [tickets, setTickets] = useState<TicketSummaryItem[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta>({
-    page: 1,
-    limit: 10,
-    totalItems: 0,
-    totalPages: 1,
-    hasNext: false,
-    hasPrev: false,
-  });
-
-  const [categories, setCategories] = useState<CategoryOption[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const categories = useCategoryOptions();
 
   // Filter States
   const [search, setSearch] = useState<string>('');
-  const [debouncedSearch, setDebouncedSearch] = useState<string>('');
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [status, setStatus] = useState<string>('All');
   const [categoryId, setCategoryId] = useState<string>('All');
   const [priority, setPriority] = useState<string>('All');
@@ -64,39 +62,8 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
   const [page, setPage] = useState<number>(1);
   const [limit, setLimit] = useState<number>(10);
 
-  // Debounce search query by 300ms
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  // Load Categories for dropdown
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadCategories() {
-      try {
-        const res = await apiFetch('/api/categories', { signal: controller.signal });
-        if (res.ok) {
-          const data: CategoryOption[] = await res.json();
-          setCategories(data);
-        }
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          console.error('Failed to load categories:', err);
-        }
-      }
-    }
-    loadCategories();
-    return () => controller.abort();
-  }, []);
-
-  const fetchTickets = useCallback(async (signal?: AbortSignal) => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
+  const fetchTicketsPage = useCallback(
+    async (signal: AbortSignal): Promise<TicketsPage> => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(limit),
@@ -110,37 +77,24 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
 
       const res = await apiFetch(`/api/tickets?${params.toString()}`, { signal });
       if (!res.ok) {
-        throw new Error(`Failed to fetch tickets (HTTP ${res.status})`);
+        const message = await parseApiError(res, `Failed to fetch tickets (HTTP ${res.status})`);
+        throw new Error(message);
       }
 
       const data = await res.json();
-      setTickets(data.tickets || []);
-      setPagination(data.pagination || {
-        page: 1,
-        limit: 10,
-        totalItems: 0,
-        totalPages: 1,
-        hasNext: false,
-        hasPrev: false,
-      });
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        setError(err.message || 'Unknown error');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [page, limit, debouncedSearch, status, categoryId, priority, sort]);
+      return { tickets: data.tickets || [], pagination: data.pagination || DEFAULT_PAGINATION };
+    },
+    [page, limit, debouncedSearch, status, categoryId, priority, sort]
+  );
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchTickets(controller.signal);
-    return () => controller.abort();
-  }, [fetchTickets]);
+  const {
+    data: { tickets, pagination },
+    isLoading,
+    error,
+  } = usePaginatedFetch<TicketsPage>(fetchTicketsPage, { tickets: [], pagination: DEFAULT_PAGINATION });
 
   const handleResetFilters = () => {
     setSearch('');
-    setDebouncedSearch('');
     setStatus('All');
     setCategoryId('All');
     setPriority('All');
@@ -173,19 +127,6 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
         return <span className="badge bg-dark">Closed</span>;
       default:
         return <span className="badge bg-light text-dark border">{s}</span>;
-    }
-  };
-
-  const formatDate = (isoString: string) => {
-    try {
-      const d = new Date(isoString);
-      return d.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      });
-    } catch {
-      return isoString;
     }
   };
 

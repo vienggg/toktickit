@@ -12,6 +12,7 @@ import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
 import {
   requireAuth,
   requirePasswordChanged,
+  requireRole,
   issueSessionCookie,
   clearSessionCookie,
 } from "./auth.js";
@@ -386,23 +387,20 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
     const take = Math.min(50, Math.max(1, parseInt(String(limit || 10), 10) || 10));
     const skip = (pageNum - 1) * take;
 
-    const [totalItems, tickets] = await Promise.all([
-      getPrisma().ticket.count({ where }),
-      getPrisma().ticket.findMany({
-        where,
-        orderBy,
-        skip,
-        take,
-        include: {
-          category: true,
-          relatedSystem: true,
-          requester: true,
-          attachments: {
-            where: { isRemoved: false },
-          },
+    const { total: totalItems, rows: tickets } = await fetchPaginatedTickets<Parameters<typeof serializeTicket>[0]>({
+      where,
+      orderBy,
+      skip,
+      take,
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: true,
+        attachments: {
+          where: { isRemoved: false },
         },
-      }),
-    ]);
+      },
+    });
 
     const totalPages = Math.ceil(totalItems / take) || 1;
 
@@ -1044,6 +1042,263 @@ app.post(
     } catch (err) {
       console.error("Resolution signal error:", err);
       return res.status(500).json({ error: "Failed to record resolution signal" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-6) — IT Staff Ticket Queue
+// ---------------------------------------------------------------------------
+
+// The staff queue needs the full 8-value TicketStatus/4-value Priority enums
+// and owner information verbatim — serializeTicket above deliberately
+// collapses status/priority back to the Lab 2 legacy casing for the
+// Requester-facing routes, which would silently drop the 4 new statuses
+// (OPEN, WAITING_FOR_REQUESTER, REOPENED, CANCELLED) this screen must show.
+// This is therefore a separate, small projection rather than a reuse of
+// serializeTicket, per api-spec.md §4 (raw enum values on the wire here).
+// Trimmed down in review of PR #67 (item 7): `description` and the
+// requester's name/email were included on every row but the Queue UI never
+// rendered them, which meant PII (requester name/email) and the full
+// description text were shipped on a list that refetches on every
+// keystroke. `description` is kept here because the item-1 "Open" modal
+// fix (also from that review) renders it from the already-fetched list
+// row rather than a new detail endpoint; `requesterName` is kept because
+// the modal's "Requester" field displays it. `requesterEmail` is dropped —
+// nothing on the row or in the modal renders it.
+function serializeStaffTicket(ticket: {
+  id: number;
+  ticketNumber: string;
+  summary: string;
+  description: string;
+  requestedPriority: Priority;
+  itPriority: Priority;
+  status: TicketStatus;
+  categoryId: number;
+  category: { id: number; name: string };
+  ownerId: number | null;
+  owner: { id: number; name: string } | null;
+  requesterId: number;
+  requester: { id: number; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    summary: ticket.summary,
+    description: ticket.description,
+    categoryId: ticket.categoryId,
+    category: ticket.category,
+    requestedPriority: ticket.requestedPriority,
+    itPriority: ticket.itPriority,
+    status: ticket.status,
+    ownerId: ticket.ownerId,
+    ownerName: ticket.owner?.name ?? null,
+    requesterId: ticket.requesterId,
+    requesterName: ticket.requester.name,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+  };
+}
+
+const STAFF_QUEUE_SORT_FIELDS = ["createdAt", "updatedAt", "itPriority", "status", "ticketNumber"] as const;
+type StaffQueueSortField = (typeof STAFF_QUEUE_SORT_FIELDS)[number];
+
+function validationError(field: string, message: string) {
+  return { error: { code: "VALIDATION_ERROR", message: `Invalid '${field}': ${message}` } };
+}
+
+// Shared "core + thin call sites" pagination/ordering/count-plus-findMany
+// shape for GET /api/tickets and GET /api/staff/tickets (item 8 in review
+// of PR #67 — same divergence risk the last two PRs' reviews fixed for
+// ownership checks via fetchAuthorizedTicketOr404). The two routes have
+// different `where` shapes, different sortable-field sets, and different
+// serialization, so only the pagination/count/findMany execution is
+// shared here, parameterized by the caller's `where` and `orderBy` — not
+// a single mega-function covering validation or serialization too.
+async function fetchPaginatedTickets<T>(params: {
+  where: Prisma.TicketWhereInput;
+  orderBy: Prisma.TicketOrderByWithRelationInput;
+  skip: number;
+  take: number;
+  include: Prisma.TicketInclude;
+}): Promise<{ total: number; rows: T[] }> {
+  const { where, orderBy, skip, take, include } = params;
+  const [total, rows] = await Promise.all([
+    getPrisma().ticket.count({ where }),
+    getPrisma().ticket.findMany({ where, orderBy, skip, take, include }) as Promise<T[]>,
+  ]);
+  return { total, rows };
+}
+
+app.get(
+  "/api/staff/tickets",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize } = req.query;
+
+      const where: Prisma.TicketWhereInput = {};
+
+      if (status !== undefined && status !== "All") {
+        if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
+          return res.status(400).json(validationError("status", "must be a valid TicketStatus or 'All'."));
+        }
+        where.status = status as TicketStatus;
+      }
+
+      if (itPriority !== undefined && itPriority !== "All") {
+        if (typeof itPriority !== "string" || !(Object.values(Priority) as string[]).includes(itPriority)) {
+          return res.status(400).json(validationError("itPriority", "must be a valid Priority or 'All'."));
+        }
+        where.itPriority = itPriority as Priority;
+      }
+
+      if (categoryId !== undefined) {
+        const parsedCategoryId = typeof categoryId === "string" ? parseStrictId(categoryId) : null;
+        if (parsedCategoryId === null) {
+          return res.status(400).json(validationError("categoryId", "must be an integer."));
+        }
+        where.categoryId = parsedCategoryId;
+      }
+
+      if (ownerId !== undefined) {
+        if (ownerId === "unassigned") {
+          where.ownerId = null;
+        } else {
+          const parsedOwnerId = typeof ownerId === "string" ? parseStrictId(ownerId) : null;
+          if (parsedOwnerId === null) {
+            return res.status(400).json(validationError("ownerId", "must be an integer or 'unassigned'."));
+          }
+          where.ownerId = parsedOwnerId;
+        }
+      }
+
+      if (search !== undefined) {
+        if (typeof search !== "string") {
+          return res.status(400).json(validationError("search", "must be a string."));
+        }
+        const query = search.trim();
+        if (query.length > 0) {
+          where.OR = [
+            { ticketNumber: { contains: query, mode: "insensitive" } },
+            { summary: { contains: query, mode: "insensitive" } },
+            { description: { contains: query, mode: "insensitive" } },
+            { requester: { name: { contains: query, mode: "insensitive" } } },
+            { requester: { email: { contains: query, mode: "insensitive" } } },
+          ];
+        }
+      }
+
+      // Default ordering is updatedAt desc per api-spec.md §4.
+      let sortField: StaffQueueSortField = "updatedAt";
+      if (sort !== undefined) {
+        if (typeof sort !== "string" || !(STAFF_QUEUE_SORT_FIELDS as readonly string[]).includes(sort)) {
+          return res.status(400).json(validationError("sort", `must be one of ${STAFF_QUEUE_SORT_FIELDS.join(", ")}.`));
+        }
+        sortField = sort as StaffQueueSortField;
+      }
+
+      let sortOrder: Prisma.SortOrder = "desc";
+      if (order !== undefined) {
+        if (order !== "asc" && order !== "desc") {
+          return res.status(400).json(validationError("order", "must be 'asc' or 'desc'."));
+        }
+        sortOrder = order;
+      }
+
+      // Upper bound added in review of PR #67 (item 3): pageSize was
+      // already capped at 50, but page itself only rejected < 1, so
+      // something like page=99999999999999999999 passed the /^\d+$/
+      // check and produced a huge `skip` handed straight to Prisma —
+      // likely surfacing as an unhandled 500 instead of this route's
+      // usual clean 400. 100000 is far beyond any real result set at
+      // pageSize<=50 (5,000,000 rows) while still comfortably bounded.
+      const MAX_PAGE = 100000;
+      let pageNum = 1;
+      if (page !== undefined) {
+        const parsedPage = typeof page === "string" ? parseStrictId(page) : null;
+        if (parsedPage === null || parsedPage < 1) {
+          return res.status(400).json(validationError("page", "must be a positive integer."));
+        }
+        if (parsedPage > MAX_PAGE) {
+          return res.status(400).json(validationError("page", `must not exceed ${MAX_PAGE}.`));
+        }
+        pageNum = parsedPage;
+      }
+
+      let pageSizeNum = 10;
+      if (pageSize !== undefined) {
+        const parsedPageSize = typeof pageSize === "string" ? parseStrictId(pageSize) : null;
+        if (parsedPageSize === null || parsedPageSize < 1) {
+          return res.status(400).json(validationError("pageSize", "must be a positive integer."));
+        }
+        if (parsedPageSize > 50) {
+          return res.status(400).json(validationError("pageSize", "must not exceed 50."));
+        }
+        pageSizeNum = parsedPageSize;
+      }
+
+      const skip = (pageNum - 1) * pageSizeNum;
+
+      const { total, rows: tickets } = await fetchPaginatedTickets<
+        Parameters<typeof serializeStaffTicket>[0]
+      >({
+        where,
+        orderBy: { [sortField]: sortOrder },
+        skip,
+        take: pageSizeNum,
+        include: {
+          category: { select: { id: true, name: true } },
+          owner: { select: { id: true, name: true } },
+          requester: { select: { id: true, name: true } },
+        },
+      });
+
+      const totalPages = Math.max(1, Math.ceil(total / pageSizeNum));
+
+      return res.status(200).json({
+        data: tickets.map(serializeStaffTicket),
+        pagination: {
+          page: pageNum,
+          pageSize: pageSizeNum,
+          total,
+          totalPages,
+        },
+      });
+    } catch (err) {
+      console.error("Staff ticket queue error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch the ticket queue." } });
+    }
+  }
+);
+
+// Added in review of PR #67 (item 2) to support the Queue's Owner filter
+// picker. There was no existing endpoint that lists IT Staff/Administrator
+// users for a picker — /api/admin/users is Administrator-only per
+// api-spec.md §5, which is wrong here since a regular IT_STAFF member must
+// also be able to filter the queue by owner. This returns just the minimal
+// roster data the picker needs ([{ id, name }], active staff only, ordered
+// by name), not the fuller shape /api/admin/users returns.
+app.get(
+  "/api/staff/members",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (_req: Request, res: Response) => {
+    try {
+      const members = await getPrisma().user.findMany({
+        where: { role: { in: [Role.IT_STAFF, Role.ADMINISTRATOR] }, isActive: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      });
+      return res.status(200).json(members);
+    } catch (err) {
+      console.error("Staff members list error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch staff members." } });
     }
   }
 );
