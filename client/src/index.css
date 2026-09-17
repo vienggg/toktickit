@@ -7,6 +7,11 @@
   --zen-neutral-dark: #1E293B;
   --zen-border: #D0E2D6;
   --zen-focus-ring: rgba(0, 107, 60, 0.25);
+  /* I-7 (ui-spec.md §7): distinguishes the Internal Notes panel from the
+     Public Comments panel on the Staff Ticket Detail screen — a Requester
+     never sees this panel at all (BR-24), but the color itself still needs
+     to read as clearly "different from public" for IT Staff/Administrator. */
+  --color-internal-note-bg: #FFF4E5;
 }
 
 body {

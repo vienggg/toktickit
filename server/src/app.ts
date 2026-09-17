@@ -9,6 +9,7 @@ import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
 import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
+import { getPermittedTransitions, isLegalTransition } from "./utils/statusTransitions.js";
 import {
   requireAuth,
   requirePasswordChanged,
@@ -1299,6 +1300,313 @@ app.get(
     } catch (err) {
       console.error("Staff members list error:", err);
       return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch staff members." } });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-7) — IT Staff Ticket Detail
+// ---------------------------------------------------------------------------
+
+// Staff visibility of a Ticket is NOT ownership-scoped (unlike the
+// Requester routes' fetchAuthorizedTicketOr404 usage above) — any IT
+// Staff/Administrator may open any Ticket, per §6. requireRole has already
+// gated every route below to IT_STAFF/ADMINISTRATOR before this runs, so
+// the `isAuthorized` predicate is always true; this still goes through
+// the same fetchAuthorizedTicketOr404 core (rather than a bespoke
+// findUnique + manual 404) so a not-found Ticket ID gets the same
+// { error: { code: "NOT_FOUND", ... } } shape as every other Ticket-scoped
+// route in this file, and so a future change to that response shape only
+// has one place to change.
+async function findStaffTicketOr404(res: Response, id: number) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () =>
+      getPrisma().ticket.findUnique({
+        where: { id },
+        include: {
+          category: true,
+          relatedSystem: true,
+          requester: true,
+          owner: { select: { id: true, name: true } },
+          attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
+        },
+      }),
+    () => true
+  );
+}
+
+type StaffTicket = NonNullable<Awaited<ReturnType<typeof findStaffTicketOr404>>>;
+
+function serializeStaffTicketDetail(ticket: StaffTicket) {
+  return {
+    id: ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    summary: ticket.summary,
+    description: ticket.description,
+    categoryId: ticket.categoryId,
+    category: ticket.category,
+    relatedSystemId: ticket.relatedSystemId,
+    relatedSystem: ticket.relatedSystem,
+    requestedPriority: ticket.requestedPriority,
+    itPriority: ticket.itPriority,
+    status: ticket.status,
+    // Server-computed permitted destinations (BR-19, §6.5) — the client's
+    // Status control reads this directly instead of keeping an
+    // independent copy of the transition matrix, per the same
+    // "server computes, client reads" fix PR #66 applied to
+    // canSignalResolution above.
+    permittedStatusTransitions: getPermittedTransitions(ticket.status),
+    ownerId: ticket.ownerId,
+    owner: ticket.owner,
+    requesterId: ticket.requesterId,
+    requester: ticket.requester,
+    attachments: ticket.attachments,
+    requesterResolvedAt: ticket.requesterResolvedAt,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+  };
+}
+
+app.get(
+  "/api/staff/tickets/:id",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      return res.status(200).json(serializeStaffTicketDetail(ticket));
+    } catch (err) {
+      console.error("Get staff ticket detail error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch ticket detail." } });
+    }
+  }
+);
+
+// BR-13: ownerId (when non-null) must reference an active IT Staff or
+// Administrator user. Covers both claim (ownerId === acting user's own id)
+// and reassignment (ownerId === any other active staff id, BR-14) — the
+// spec draws no distinction between the two beyond the value sent.
+app.patch(
+  "/api/staff/tickets/:id/owner",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const { ownerId } = req.body ?? {};
+      if (ownerId !== null && !Number.isInteger(ownerId)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'ownerId' must be an integer or null." } });
+      }
+
+      if (ownerId !== null) {
+        const candidate = await getPrisma().user.findUnique({ where: { id: ownerId } });
+        if (!candidate || !candidate.isActive || !(candidate.role === Role.IT_STAFF || candidate.role === Role.ADMINISTRATOR)) {
+          return res.status(400).json({
+            error: { code: "VALIDATION_ERROR", message: "'ownerId' must reference an active IT Staff or Administrator user." },
+          });
+        }
+      }
+
+      await getPrisma().ticket.update({ where: { id: ticket.id }, data: { ownerId } });
+      const updated = await findStaffTicketOr404(res, ticket.id);
+      if (!updated) return;
+
+      return res.status(200).json(serializeStaffTicketDetail(updated));
+    } catch (err) {
+      console.error("Set ticket owner error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update ticket owner." } });
+    }
+  }
+);
+
+// BR-16: IT Priority is validated against the Priority enum and updated
+// independently of the immutable Requested Priority (BR-15).
+app.patch(
+  "/api/staff/tickets/:id/it-priority",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const { itPriority } = req.body ?? {};
+      if (typeof itPriority !== "string" || !(Object.values(Priority) as string[]).includes(itPriority)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'itPriority' must be a valid Priority value." } });
+      }
+
+      await getPrisma().ticket.update({ where: { id: ticket.id }, data: { itPriority: itPriority as Priority } });
+      const updated = await findStaffTicketOr404(res, ticket.id);
+      if (!updated) return;
+
+      return res.status(200).json(serializeStaffTicketDetail(updated));
+    } catch (err) {
+      console.error("Set IT priority error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update IT priority." } });
+    }
+  }
+);
+
+// BR-19/BR-17/§6.5: validated against the single STATUS_TRANSITIONS matrix
+// (server/src/utils/statusTransitions.ts) shared with GET's
+// permittedStatusTransitions field and the UNIT-03/04 unit tests.
+app.patch(
+  "/api/staff/tickets/:id/status",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const { status } = req.body ?? {};
+      if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'status' must be a valid TicketStatus value." } });
+      }
+      const targetStatus = status as TicketStatus;
+
+      if (!isLegalTransition(ticket.status, targetStatus)) {
+        return res.status(409).json({
+          error: { code: "ILLEGAL_TRANSITION", permitted: getPermittedTransitions(ticket.status) },
+        });
+      }
+
+      // BR-17: a Ticket cannot enter IN_PROGRESS while unassigned, even
+      // though IN_PROGRESS may otherwise be a legal destination from the
+      // current status.
+      if (targetStatus === TicketStatus.IN_PROGRESS && ticket.ownerId === null) {
+        return res.status(409).json({
+          error: {
+            code: "ILLEGAL_TRANSITION",
+            message: "A ticket cannot enter IN_PROGRESS while unassigned.",
+            permitted: getPermittedTransitions(ticket.status).filter((s) => s !== TicketStatus.IN_PROGRESS),
+          },
+        });
+      }
+
+      await getPrisma().ticket.update({ where: { id: ticket.id }, data: { status: targetStatus } });
+      const updated = await findStaffTicketOr404(res, ticket.id);
+      if (!updated) return;
+
+      return res.status(200).json(serializeStaffTicketDetail(updated));
+    } catch (err) {
+      console.error("Set ticket status error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update ticket status." } });
+    }
+  }
+);
+
+// Internal Notes (BR-04, BR-21-BR-24): IT Staff/Administrator only. A
+// Requester's request is rejected by requireRole above with the same
+// generic { error: { code: "FORBIDDEN", ... } } body every other
+// role-gated route in this file returns — no note content, not even an
+// empty typed array, is ever present in that response. Mirrors the
+// GET/POST /api/tickets/:id/comments shape above (validateCommentBody,
+// author/timestamp server-set) but against the separate InternalNote
+// table and with no ownership scoping (any Staff/Admin may view any
+// Ticket's notes, same as findStaffTicketOr404 above).
+app.get(
+  "/api/tickets/:id/internal-notes",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const notes = await getPrisma().internalNote.findMany({
+        where: { ticketId: ticket.id },
+        include: { author: { select: { id: true, name: true, role: true } } },
+        orderBy: { createdAt: "asc" },
+      });
+      return res.status(200).json(
+        notes.map((n) => ({
+          id: n.id,
+          ticketId: n.ticketId,
+          authorId: n.authorId,
+          authorName: n.author.name,
+          authorRole: n.author.role,
+          body: n.body,
+          createdAt: n.createdAt,
+        }))
+      );
+    } catch (err) {
+      console.error("List internal notes error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch internal notes." } });
+    }
+  }
+);
+
+app.post(
+  "/api/tickets/:id/internal-notes",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      // BR-23: same 1-2000 char / non-blank validation as Public Comments.
+      const body = validateCommentBody(req.body?.body);
+      if (body === null) {
+        return res.status(400).json({
+          error: { code: "VALIDATION_ERROR", message: "Note must be between 1 and 2000 characters." },
+        });
+      }
+
+      // BR-22: author and timestamp are server-set, never trusted from the client.
+      const note = await getPrisma().internalNote.create({
+        data: { ticketId: ticket.id, authorId: req.authUser!.id, body },
+        include: { author: { select: { id: true, name: true, role: true } } },
+      });
+
+      return res.status(201).json({
+        id: note.id,
+        ticketId: note.ticketId,
+        authorId: note.authorId,
+        authorName: note.author.name,
+        authorRole: note.author.role,
+        body: note.body,
+        createdAt: note.createdAt,
+      });
+    } catch (err) {
+      console.error("Create internal note error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to post internal note." } });
     }
   }
 );

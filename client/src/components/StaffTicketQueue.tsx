@@ -80,81 +80,12 @@ function OwnerPill({ name }: { name: string | null }) {
   return <span>{name}</span>;
 }
 
-// Item 1 fix (review of PR #67): "Open" previously navigated to
-// `/staff/tickets/:id`, a route App.tsx never defines — every click fell
-// through to the catch-all `/*` route and silently landed on the
-// Requester's own workspace. Issue #55 (this screen) is Queue-only; the
-// full Staff Ticket Detail screen (ownership panel, status transitions,
-// internal notes) and its `GET /api/staff/tickets/:id` endpoint belong to
-// the separate, not-yet-started Issue #56 (I-7). Building that here would
-// be scope creep into a different Issue's rubric line. Instead, the
-// Queue's one specified action ("tap to open") now opens a read-only
-// modal populated purely from the already-fetched list-row data — no new
-// endpoint, no duplicate-with-I-7 detail screen.
-function TicketDetailModal({ ticket, onClose }: { ticket: StaffQueueTicket; onClose: () => void }) {
-  return (
-    <div
-      className="modal d-block"
-      tabIndex={-1}
-      role="dialog"
-      aria-modal="true"
-      data-testid="ticket-detail-modal"
-      style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-      onClick={onClose}
-    >
-      <div className="modal-dialog modal-dialog-centered" role="document" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title font-monospace">{ticket.ticketNumber}</h5>
-            <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
-          </div>
-          <div className="modal-body">
-            <h6 className="fw-bold">{ticket.summary}</h6>
-            <p className="text-muted">{ticket.description}</p>
-            <dl className="row small mb-0">
-              <dt className="col-5">Category</dt>
-              <dd className="col-7">{ticket.category?.name}</dd>
-
-              <dt className="col-5">Requested Priority</dt>
-              <dd className="col-7">
-                <PriorityBadge priority={ticket.requestedPriority} label="Requested" />
-              </dd>
-
-              <dt className="col-5">IT Priority</dt>
-              <dd className="col-7">
-                <PriorityBadge priority={ticket.itPriority} label="IT Priority" />
-              </dd>
-
-              <dt className="col-5">Status</dt>
-              <dd className="col-7">
-                <StatusBadge status={ticket.status} />
-              </dd>
-
-              <dt className="col-5">Owner</dt>
-              <dd className="col-7">
-                <OwnerPill name={ticket.ownerName} />
-              </dd>
-
-              <dt className="col-5">Requester</dt>
-              <dd className="col-7">{ticket.requesterName}</dd>
-
-              <dt className="col-5">Created</dt>
-              <dd className="col-7">{formatDate(ticket.createdAt)}</dd>
-
-              <dt className="col-5">Last Updated</dt>
-              <dd className="col-7">{formatDate(ticket.updatedAt)}</dd>
-            </dl>
-          </div>
-          <div className="modal-footer">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// The read-only TicketDetailModal built as I-6's stopgap ("Open" action)
+// was removed here once I-7 (Issue #56) shipped the real, editable Staff
+// Ticket Detail screen at /staff/tickets/:id — see handleOpen below. The
+// modal is no longer reachable from this screen's default behavior; a
+// caller that still wants a custom, non-navigating "Open" action can pass
+// onOpenTicket and render its own UI from the ticket id it receives.
 
 interface QueuePage {
   tickets: StaffQueueTicket[];
@@ -192,8 +123,6 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const pageSize = 10;
-
-  const [selectedTicket, setSelectedTicket] = useState<StaffQueueTicket | null>(null);
 
   const hasActiveFilters =
     debouncedSearch.trim() !== '' || status !== 'All' || itPriority !== 'All' || categoryId !== 'All' || ownerFilter !== 'All';
@@ -261,14 +190,15 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
     setPage(1);
   };
 
-  // Default behavior opens the read-only modal using the already-fetched
-  // row data (see TicketDetailModal above for why — this is I-6's own
-  // scope, not I-7's detail screen). `onOpenTicket` remains available as
-  // an optional override for a caller that wants custom behavior instead
-  // of the modal; it must never silently fall through to navigate().
+  // I-7 (Issue #56) now provides the real, editable Staff Ticket Detail
+  // screen at /staff/tickets/:id, so "Open" navigates there by default
+  // instead of the read-only modal that was I-6's stopgap (kept above,
+  // still available, but no longer the default action). `onOpenTicket`
+  // remains available as an optional override for a caller that wants
+  // custom behavior instead of navigation.
   const handleOpen = (ticket: StaffQueueTicket) => {
     if (onOpenTicket) onOpenTicket(ticket.id);
-    else setSelectedTicket(ticket);
+    else navigate(`/staff/tickets/${ticket.id}`);
   };
 
   const handleLogout = async () => {
@@ -627,7 +557,6 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
         </div>
       )}
 
-      {selectedTicket && <TicketDetailModal ticket={selectedTicket} onClose={() => setSelectedTicket(null)} />}
     </div>
   );
 };

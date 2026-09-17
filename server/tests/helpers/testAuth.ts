@@ -125,3 +125,40 @@ export async function loginAsRegressionStaff() {
   }
   return agent;
 }
+
+// Dedicated fixture account for I-7's staff-ticket-detail routes and the
+// I-8 admin routes (Administrator side of the §6 authorization grid). Same
+// rationale as the other regression fixtures above.
+export const REGRESSION_ADMIN_EMAIL = "regression-suite-admin@toktick.internal";
+export const REGRESSION_ADMIN_PASSWORD = "RegressionTest012";
+
+export async function ensureRegressionAdmin() {
+  const prisma = getPrisma();
+  return prisma.user.upsert({
+    where: { email: REGRESSION_ADMIN_EMAIL },
+    update: { isActive: true, mustChangePassword: false, role: Role.ADMINISTRATOR, passwordHash: hashPassword(REGRESSION_ADMIN_PASSWORD) },
+    create: {
+      name: "Regression Suite Admin",
+      email: REGRESSION_ADMIN_EMAIL,
+      department: "IT",
+      role: Role.ADMINISTRATOR,
+      passwordHash: hashPassword(REGRESSION_ADMIN_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+}
+
+/** Returns a supertest agent already logged in as the regression Administrator fixture. */
+export async function loginAsRegressionAdmin() {
+  await ensureRegressionAdmin();
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_ADMIN_EMAIL,
+    password: REGRESSION_ADMIN_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression admin: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}
