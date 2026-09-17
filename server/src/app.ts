@@ -387,23 +387,20 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
     const take = Math.min(50, Math.max(1, parseInt(String(limit || 10), 10) || 10));
     const skip = (pageNum - 1) * take;
 
-    const [totalItems, tickets] = await Promise.all([
-      getPrisma().ticket.count({ where }),
-      getPrisma().ticket.findMany({
-        where,
-        orderBy,
-        skip,
-        take,
-        include: {
-          category: true,
-          relatedSystem: true,
-          requester: true,
-          attachments: {
-            where: { isRemoved: false },
-          },
+    const { total: totalItems, rows: tickets } = await fetchPaginatedTickets<Parameters<typeof serializeTicket>[0]>({
+      where,
+      orderBy,
+      skip,
+      take,
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: true,
+        attachments: {
+          where: { isRemoved: false },
         },
-      }),
-    ]);
+      },
+    });
 
     const totalPages = Math.ceil(totalItems / take) || 1;
 
@@ -1060,6 +1057,15 @@ app.post(
 // (OPEN, WAITING_FOR_REQUESTER, REOPENED, CANCELLED) this screen must show.
 // This is therefore a separate, small projection rather than a reuse of
 // serializeTicket, per api-spec.md §4 (raw enum values on the wire here).
+// Trimmed down in review of PR #67 (item 7): `description` and the
+// requester's name/email were included on every row but the Queue UI never
+// rendered them, which meant PII (requester name/email) and the full
+// description text were shipped on a list that refetches on every
+// keystroke. `description` is kept here because the item-1 "Open" modal
+// fix (also from that review) renders it from the already-fetched list
+// row rather than a new detail endpoint; `requesterName` is kept because
+// the modal's "Requester" field displays it. `requesterEmail` is dropped —
+// nothing on the row or in the modal renders it.
 function serializeStaffTicket(ticket: {
   id: number;
   ticketNumber: string;
@@ -1073,7 +1079,7 @@ function serializeStaffTicket(ticket: {
   ownerId: number | null;
   owner: { id: number; name: string } | null;
   requesterId: number;
-  requester: { id: number; name: string; email: string };
+  requester: { id: number; name: string };
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -1091,7 +1097,6 @@ function serializeStaffTicket(ticket: {
     ownerName: ticket.owner?.name ?? null,
     requesterId: ticket.requesterId,
     requesterName: ticket.requester.name,
-    requesterEmail: ticket.requester.email,
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
   };
@@ -1102,6 +1107,29 @@ type StaffQueueSortField = (typeof STAFF_QUEUE_SORT_FIELDS)[number];
 
 function validationError(field: string, message: string) {
   return { error: { code: "VALIDATION_ERROR", message: `Invalid '${field}': ${message}` } };
+}
+
+// Shared "core + thin call sites" pagination/ordering/count-plus-findMany
+// shape for GET /api/tickets and GET /api/staff/tickets (item 8 in review
+// of PR #67 — same divergence risk the last two PRs' reviews fixed for
+// ownership checks via fetchAuthorizedTicketOr404). The two routes have
+// different `where` shapes, different sortable-field sets, and different
+// serialization, so only the pagination/count/findMany execution is
+// shared here, parameterized by the caller's `where` and `orderBy` — not
+// a single mega-function covering validation or serialization too.
+async function fetchPaginatedTickets<T>(params: {
+  where: Prisma.TicketWhereInput;
+  orderBy: Prisma.TicketOrderByWithRelationInput;
+  skip: number;
+  take: number;
+  include: Prisma.TicketInclude;
+}): Promise<{ total: number; rows: T[] }> {
+  const { where, orderBy, skip, take, include } = params;
+  const [total, rows] = await Promise.all([
+    getPrisma().ticket.count({ where }),
+    getPrisma().ticket.findMany({ where, orderBy, skip, take, include }) as Promise<T[]>,
+  ]);
+  return { total, rows };
 }
 
 app.get(
@@ -1130,19 +1158,22 @@ app.get(
       }
 
       if (categoryId !== undefined) {
-        if (typeof categoryId !== "string" || !/^\d+$/.test(categoryId)) {
+        const parsedCategoryId = typeof categoryId === "string" ? parseStrictId(categoryId) : null;
+        if (parsedCategoryId === null) {
           return res.status(400).json(validationError("categoryId", "must be an integer."));
         }
-        where.categoryId = parseInt(categoryId, 10);
+        where.categoryId = parsedCategoryId;
       }
 
       if (ownerId !== undefined) {
         if (ownerId === "unassigned") {
           where.ownerId = null;
-        } else if (typeof ownerId === "string" && /^\d+$/.test(ownerId)) {
-          where.ownerId = parseInt(ownerId, 10);
         } else {
-          return res.status(400).json(validationError("ownerId", "must be an integer or 'unassigned'."));
+          const parsedOwnerId = typeof ownerId === "string" ? parseStrictId(ownerId) : null;
+          if (parsedOwnerId === null) {
+            return res.status(400).json(validationError("ownerId", "must be an integer or 'unassigned'."));
+          }
+          where.ownerId = parsedOwnerId;
         }
       }
 
@@ -1179,41 +1210,53 @@ app.get(
         sortOrder = order;
       }
 
+      // Upper bound added in review of PR #67 (item 3): pageSize was
+      // already capped at 50, but page itself only rejected < 1, so
+      // something like page=99999999999999999999 passed the /^\d+$/
+      // check and produced a huge `skip` handed straight to Prisma —
+      // likely surfacing as an unhandled 500 instead of this route's
+      // usual clean 400. 100000 is far beyond any real result set at
+      // pageSize<=50 (5,000,000 rows) while still comfortably bounded.
+      const MAX_PAGE = 100000;
       let pageNum = 1;
       if (page !== undefined) {
-        if (typeof page !== "string" || !/^\d+$/.test(page) || parseInt(page, 10) < 1) {
+        const parsedPage = typeof page === "string" ? parseStrictId(page) : null;
+        if (parsedPage === null || parsedPage < 1) {
           return res.status(400).json(validationError("page", "must be a positive integer."));
         }
-        pageNum = parseInt(page, 10);
+        if (parsedPage > MAX_PAGE) {
+          return res.status(400).json(validationError("page", `must not exceed ${MAX_PAGE}.`));
+        }
+        pageNum = parsedPage;
       }
 
       let pageSizeNum = 10;
       if (pageSize !== undefined) {
-        if (typeof pageSize !== "string" || !/^\d+$/.test(pageSize) || parseInt(pageSize, 10) < 1) {
+        const parsedPageSize = typeof pageSize === "string" ? parseStrictId(pageSize) : null;
+        if (parsedPageSize === null || parsedPageSize < 1) {
           return res.status(400).json(validationError("pageSize", "must be a positive integer."));
         }
-        pageSizeNum = parseInt(pageSize, 10);
-        if (pageSizeNum > 50) {
+        if (parsedPageSize > 50) {
           return res.status(400).json(validationError("pageSize", "must not exceed 50."));
         }
+        pageSizeNum = parsedPageSize;
       }
 
       const skip = (pageNum - 1) * pageSizeNum;
 
-      const [total, tickets] = await Promise.all([
-        getPrisma().ticket.count({ where }),
-        getPrisma().ticket.findMany({
-          where,
-          orderBy: { [sortField]: sortOrder },
-          skip,
-          take: pageSizeNum,
-          include: {
-            category: { select: { id: true, name: true } },
-            owner: { select: { id: true, name: true } },
-            requester: { select: { id: true, name: true, email: true } },
-          },
-        }),
-      ]);
+      const { total, rows: tickets } = await fetchPaginatedTickets<
+        Parameters<typeof serializeStaffTicket>[0]
+      >({
+        where,
+        orderBy: { [sortField]: sortOrder },
+        skip,
+        take: pageSizeNum,
+        include: {
+          category: { select: { id: true, name: true } },
+          owner: { select: { id: true, name: true } },
+          requester: { select: { id: true, name: true } },
+        },
+      });
 
       const totalPages = Math.max(1, Math.ceil(total / pageSizeNum));
 
@@ -1229,6 +1272,33 @@ app.get(
     } catch (err) {
       console.error("Staff ticket queue error:", err);
       return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch the ticket queue." } });
+    }
+  }
+);
+
+// Added in review of PR #67 (item 2) to support the Queue's Owner filter
+// picker. There was no existing endpoint that lists IT Staff/Administrator
+// users for a picker — /api/admin/users is Administrator-only per
+// api-spec.md §5, which is wrong here since a regular IT_STAFF member must
+// also be able to filter the queue by owner. This returns just the minimal
+// roster data the picker needs ([{ id, name }], active staff only, ordered
+// by name), not the fuller shape /api/admin/users returns.
+app.get(
+  "/api/staff/members",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (_req: Request, res: Response) => {
+    try {
+      const members = await getPrisma().user.findMany({
+        where: { role: { in: [Role.IT_STAFF, Role.ADMINISTRATOR] }, isActive: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      });
+      return res.status(200).json(members);
+    } catch (err) {
+      console.error("Staff members list error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch staff members." } });
     }
   }
 );

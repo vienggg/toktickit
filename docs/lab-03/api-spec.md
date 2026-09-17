@@ -111,6 +111,20 @@ IT Staff, Administrator only. Query parameters:
 Response: `{ data: Ticket[], pagination: { page, pageSize, total, totalPages } }`.
 An invalid parameter (unknown enum value, non-numeric `page`, `pageSize` > 50)
 returns 400 naming the offending field. Default ordering is `updatedAt desc`.
+**Added in review of PR #67:** `page` is also capped at 100000 (400, naming
+`page`) — previously only `pageSize` had an upper bound, so an absurdly large
+`page` value passed validation and produced an oversized `skip` handed
+straight to Prisma.
+
+### `GET /api/staff/members`
+**Added in review of PR #67** to support the Owner filter picker on the
+Ticket Queue screen (I-6) — there was no existing endpoint that lists IT
+Staff/Administrator users, and `/api/admin/users` below is Administrator-only,
+which is wrong for this purpose since a regular IT Staff member must also be
+able to filter the queue by owner. IT Staff, Administrator only. No query
+parameters. 200 → array of `{ id, name }` for active `IT_STAFF`/`ADMINISTRATOR`
+users, ordered by name. Intentionally minimal — just the roster data a picker
+needs, not the fuller shape `GET /api/admin/users` returns.
 
 ### `GET /api/staff/tickets/:id`
 IT Staff, Administrator only. Full operational view including owner, IT

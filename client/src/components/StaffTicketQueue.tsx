@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch, parseApiError } from '../api';
+import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, formatDate } from '../hooks/usePaginatedFetch';
 
 export interface StaffQueueTicket {
   id: number;
@@ -17,7 +18,6 @@ export interface StaffQueueTicket {
   ownerName: string | null;
   requesterId: number;
   requesterName: string;
-  requesterEmail: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -29,7 +29,7 @@ interface PaginationMeta {
   totalPages: number;
 }
 
-interface CategoryOption {
+interface StaffMember {
   id: number;
   name: string;
 }
@@ -80,26 +80,110 @@ function OwnerPill({ name }: { name: string | null }) {
   return <span>{name}</span>;
 }
 
-function formatDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-  } catch {
-    return iso;
-  }
+// Item 1 fix (review of PR #67): "Open" previously navigated to
+// `/staff/tickets/:id`, a route App.tsx never defines — every click fell
+// through to the catch-all `/*` route and silently landed on the
+// Requester's own workspace. Issue #55 (this screen) is Queue-only; the
+// full Staff Ticket Detail screen (ownership panel, status transitions,
+// internal notes) and its `GET /api/staff/tickets/:id` endpoint belong to
+// the separate, not-yet-started Issue #56 (I-7). Building that here would
+// be scope creep into a different Issue's rubric line. Instead, the
+// Queue's one specified action ("tap to open") now opens a read-only
+// modal populated purely from the already-fetched list-row data — no new
+// endpoint, no duplicate-with-I-7 detail screen.
+function TicketDetailModal({ ticket, onClose }: { ticket: StaffQueueTicket; onClose: () => void }) {
+  return (
+    <div
+      className="modal d-block"
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      data-testid="ticket-detail-modal"
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+      onClick={onClose}
+    >
+      <div className="modal-dialog modal-dialog-centered" role="document" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title font-monospace">{ticket.ticketNumber}</h5>
+            <button type="button" className="btn-close" aria-label="Close" onClick={onClose} />
+          </div>
+          <div className="modal-body">
+            <h6 className="fw-bold">{ticket.summary}</h6>
+            <p className="text-muted">{ticket.description}</p>
+            <dl className="row small mb-0">
+              <dt className="col-5">Category</dt>
+              <dd className="col-7">{ticket.category?.name}</dd>
+
+              <dt className="col-5">Requested Priority</dt>
+              <dd className="col-7">
+                <PriorityBadge priority={ticket.requestedPriority} label="Requested" />
+              </dd>
+
+              <dt className="col-5">IT Priority</dt>
+              <dd className="col-7">
+                <PriorityBadge priority={ticket.itPriority} label="IT Priority" />
+              </dd>
+
+              <dt className="col-5">Status</dt>
+              <dd className="col-7">
+                <StatusBadge status={ticket.status} />
+              </dd>
+
+              <dt className="col-5">Owner</dt>
+              <dd className="col-7">
+                <OwnerPill name={ticket.ownerName} />
+              </dd>
+
+              <dt className="col-5">Requester</dt>
+              <dd className="col-7">{ticket.requesterName}</dd>
+
+              <dt className="col-5">Created</dt>
+              <dd className="col-7">{formatDate(ticket.createdAt)}</dd>
+
+              <dt className="col-5">Last Updated</dt>
+              <dd className="col-7">{formatDate(ticket.updatedAt)}</dd>
+            </dl>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface QueuePage {
+  tickets: StaffQueueTicket[];
+  pagination: PaginationMeta;
 }
 
 export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }> = ({ onOpenTicket }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
-  const [tickets, setTickets] = useState<StaffQueueTicket[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta>(DEFAULT_PAGINATION);
-  const [categories, setCategories] = useState<CategoryOption[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const categories = useCategoryOptions();
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    async function loadStaffMembers() {
+      try {
+        const res = await apiFetch('/api/staff/members', { signal: controller.signal });
+        if (res.ok) setStaffMembers(await res.json());
+      } catch {
+        // Non-fatal — the Owner picker simply stays limited to All/Unassigned.
+      }
+    }
+    loadStaffMembers();
+    return () => controller.abort();
+  }, []);
 
   const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 300);
   const [status, setStatus] = useState('All');
   const [itPriority, setItPriority] = useState('All');
   const [categoryId, setCategoryId] = useState('All');
@@ -109,74 +193,57 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    async function loadCategories() {
-      try {
-        const res = await apiFetch('/api/categories', { signal: controller.signal });
-        if (res.ok) setCategories(await res.json());
-      } catch {
-        // Non-fatal — category filter simply stays empty.
-      }
-    }
-    loadCategories();
-    return () => controller.abort();
-  }, []);
+  const [selectedTicket, setSelectedTicket] = useState<StaffQueueTicket | null>(null);
 
   const hasActiveFilters =
     debouncedSearch.trim() !== '' || status !== 'All' || itPriority !== 'All' || categoryId !== 'All' || ownerFilter !== 'All';
 
-  const fetchTickets = useCallback(
-    async (signal?: AbortSignal) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams({
-          page: String(page),
-          pageSize: String(pageSize),
-          sort,
-          order,
-        });
-        if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
-        if (status !== 'All') params.append('status', status);
-        if (itPriority !== 'All') params.append('itPriority', itPriority);
-        if (categoryId !== 'All') params.append('categoryId', categoryId);
-        if (ownerFilter !== 'All') params.append('ownerId', ownerFilter);
+  const fetchQueuePage = useCallback(
+    async (signal: AbortSignal): Promise<QueuePage> => {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+        sort,
+        order,
+      });
+      if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim());
+      if (status !== 'All') params.append('status', status);
+      if (itPriority !== 'All') params.append('itPriority', itPriority);
+      if (categoryId !== 'All') params.append('categoryId', categoryId);
+      if (ownerFilter !== 'All') params.append('ownerId', ownerFilter);
 
-        const res = await apiFetch(`/api/staff/tickets?${params.toString()}`, { signal });
-        if (!res.ok) {
-          const message = await parseApiError(res, 'Unable to load the ticket queue right now.');
-          throw new Error(message);
-        }
-        const data = await res.json();
-        setTickets(data.data || []);
-        setPagination(data.pagination || DEFAULT_PAGINATION);
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name !== 'AbortError') {
-          setError(err.message || 'Unable to load the ticket queue right now.');
-          setTickets([]);
-        }
-      } finally {
-        setIsLoading(false);
+      const res = await apiFetch(`/api/staff/tickets?${params.toString()}`, { signal });
+      if (!res.ok) {
+        const message = await parseApiError(res, 'Unable to load the ticket queue right now.');
+        throw new Error(message);
       }
+      const data = await res.json();
+      return { tickets: data.data || [], pagination: data.pagination || DEFAULT_PAGINATION };
     },
     [page, sort, order, debouncedSearch, status, itPriority, categoryId, ownerFilter]
   );
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchTickets(controller.signal);
-    return () => controller.abort();
-  }, [fetchTickets]);
+  const {
+    data: { tickets, pagination },
+    isLoading,
+    error,
+  } = usePaginatedFetch<QueuePage>(fetchQueuePage, { tickets: [], pagination: DEFAULT_PAGINATION });
+
+  // Item 5 fix (review of PR #67): previously, if a stale `page` state
+  // pointed past the data that now exists underneath it (e.g. ownership
+  // churn dropped the current page's row count to zero between requests),
+  // none of the empty/no-results/results blocks rendered and Prev/Next
+  // only existed inside the results block — leaving a blank screen with
+  // no way back except a full reload. Auto-clamp back to the last valid
+  // page as soon as we learn it's out of range.
+  React.useEffect(() => {
+    if (!isLoading && !error && pagination.total > 0 && page > pagination.totalPages) {
+      setPage(pagination.totalPages);
+    }
+  }, [isLoading, error, pagination.total, pagination.totalPages, page]);
 
   const handleClearFilters = () => {
     setSearch('');
-    setDebouncedSearch('');
     setStatus('All');
     setItPriority('All');
     setCategoryId('All');
@@ -194,9 +261,14 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
     setPage(1);
   };
 
-  const handleOpen = (id: number) => {
-    if (onOpenTicket) onOpenTicket(id);
-    else navigate(`/staff/tickets/${id}`);
+  // Default behavior opens the read-only modal using the already-fetched
+  // row data (see TicketDetailModal above for why — this is I-6's own
+  // scope, not I-7's detail screen). `onOpenTicket` remains available as
+  // an optional override for a caller that wants custom behavior instead
+  // of the modal; it must never silently fall through to navigate().
+  const handleOpen = (ticket: StaffQueueTicket) => {
+    if (onOpenTicket) onOpenTicket(ticket.id);
+    else setSelectedTicket(ticket);
   };
 
   const handleLogout = async () => {
@@ -206,6 +278,13 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
 
   const isEmptyQueue = !isLoading && !error && tickets.length === 0 && !hasActiveFilters && pagination.total === 0;
   const isNoResults = !isLoading && !error && tickets.length === 0 && hasActiveFilters;
+  // Covers the item-5 stale-page case: filters are inactive, there ARE
+  // rows on the server (pagination.total > 0), but this page's slice
+  // came back empty — the auto-clamp effect above will move `page` back
+  // into range; in the meantime, avoid rendering nothing at all.
+  const isStaleEmptyPage = !isLoading && !error && tickets.length === 0 && !hasActiveFilters && pagination.total > 0;
+
+  const showPagination = !isLoading && !error && pagination.total > 0;
 
   return (
     <div className="container-fluid py-3 px-3 px-lg-4" style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)', minHeight: '100vh' }}>
@@ -316,6 +395,11 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
               >
                 <option value="All">All</option>
                 <option value="unassigned">Unassigned</option>
+                {staffMembers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
@@ -362,6 +446,14 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
             <button type="button" className="btn btn-outline-secondary btn-sm" onClick={handleClearFilters}>
               Clear Filters
             </button>
+          </div>
+        </div>
+      )}
+
+      {isStaleEmptyPage && (
+        <div className="card border-0 shadow-sm">
+          <div className="card-body text-center py-5">
+            <p className="text-muted mb-0">This page no longer has any tickets. Returning to the last available page…</p>
           </div>
         </div>
       )}
@@ -419,7 +511,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                       </td>
                       <td className="small text-muted">{formatDate(t.updatedAt)}</td>
                       <td>
-                        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => handleOpen(t.id)}>
+                        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => handleOpen(t)}>
                           Open
                         </button>
                       </td>
@@ -436,9 +528,19 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
               <table className="table table-hover align-middle mb-0">
                 <thead className="table-light small">
                   <tr>
-                    <th>Ticket Number</th>
+                    {/* Item 6 fix (review of PR #67): the tablet table previously
+                        rendered the same sortable data as the desktop table with
+                        no sort control at all. Ticket Number and Status match
+                        the desktop table's sortable columns and fit the
+                        condensed width; the same handleSortClick handler is
+                        reused so both layouts stay in sync on sort state. */}
+                    <th role="button" onClick={() => handleSortClick('ticketNumber')}>
+                      Ticket Number
+                    </th>
                     <th>Summary</th>
-                    <th>Status</th>
+                    <th role="button" onClick={() => handleSortClick('status')}>
+                      Status
+                    </th>
                     <th>IT Priority</th>
                     <th>Owner</th>
                     <th>Action</th>
@@ -461,7 +563,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                         <OwnerPill name={t.ownerName} />
                       </td>
                       <td>
-                        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => handleOpen(t.id)}>
+                        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => handleOpen(t)}>
                           Open
                         </button>
                       </td>
@@ -479,7 +581,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                 key={t.id}
                 className="card border-0 shadow-sm"
                 role="button"
-                onClick={() => handleOpen(t.id)}
+                onClick={() => handleOpen(t)}
                 data-testid="ticket-card"
               >
                 <div className="card-body">
@@ -496,33 +598,36 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
               </div>
             ))}
           </div>
-
-          {/* Pagination */}
-          <div className="d-flex flex-column flex-md-row justify-content-between align-items-center gap-2 mt-3">
-            <div className="text-muted small">
-              Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
-            </div>
-            <nav aria-label="Staff queue pagination">
-              <ul className="pagination pagination-sm mb-0">
-                <li className={`page-item ${pagination.page <= 1 ? 'disabled' : ''}`}>
-                  <button className="page-link" onClick={() => setPage(page - 1)} disabled={pagination.page <= 1}>
-                    « Prev
-                  </button>
-                </li>
-                <li className={`page-item ${pagination.page >= pagination.totalPages ? 'disabled' : ''}`}>
-                  <button
-                    className="page-link"
-                    onClick={() => setPage(page + 1)}
-                    disabled={pagination.page >= pagination.totalPages}
-                  >
-                    Next »
-                  </button>
-                </li>
-              </ul>
-            </nav>
-          </div>
         </>
       )}
+
+      {showPagination && (
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-center gap-2 mt-3">
+          <div className="text-muted small">
+            Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
+          </div>
+          <nav aria-label="Staff queue pagination">
+            <ul className="pagination pagination-sm mb-0">
+              <li className={`page-item ${pagination.page <= 1 ? 'disabled' : ''}`}>
+                <button className="page-link" onClick={() => setPage(page - 1)} disabled={pagination.page <= 1}>
+                  « Prev
+                </button>
+              </li>
+              <li className={`page-item ${pagination.page >= pagination.totalPages ? 'disabled' : ''}`}>
+                <button
+                  className="page-link"
+                  onClick={() => setPage(page + 1)}
+                  disabled={pagination.page >= pagination.totalPages}
+                >
+                  Next »
+                </button>
+              </li>
+            </ul>
+          </nav>
+        </div>
+      )}
+
+      {selectedTicket && <TicketDetailModal ticket={selectedTicket} onClose={() => setSelectedTicket(null)} />}
     </div>
   );
 };

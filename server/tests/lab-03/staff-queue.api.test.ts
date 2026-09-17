@@ -183,4 +183,48 @@ describe('IT Staff Ticket Queue (API-13, API-14)', () => {
     expect(res.body.data).toHaveLength(2);
     expect(res.body.pagination).toMatchObject({ page: 1, pageSize: 2, total: 3, totalPages: 2 });
   });
+
+  // Added in review of PR #67 (item 3): page only rejected values < 1;
+  // a huge page number like this passed the old /^\d+$/ regex and
+  // produced a huge `skip` handed straight to Prisma, likely surfacing
+  // as an unhandled 500 instead of this route's usual clean 400.
+  it('API-13n: a huge page number returns 400 naming the field, not a 500', async () => {
+    const res = await staffAgent.get('/api/staff/tickets').query({ page: '99999999999999999999' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toContain('page');
+  });
+});
+
+// Added in review of PR #67 (item 2): GET /api/staff/members backs the
+// Queue's Owner filter picker. See docs/lab-03/api-spec.md §4.
+describe('IT Staff Members Roster (added in review of PR #67)', () => {
+  let staffAgent: SuperTestAgent;
+  let requesterAgent: SuperTestAgent;
+
+  beforeAll(async () => {
+    staffAgent = await loginAsRegressionStaff();
+    requesterAgent = await loginAsRegressionRequester();
+  });
+
+  it('an IT Staff user gets 200 with an array of active staff/admin members ordered by name', async () => {
+    const res = await staffAgent.get('/api/staff/members');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.some((m: { name: string }) => m.name === 'Regression Suite Staff')).toBe(true);
+    const names = res.body.map((m: { name: string }) => m.name);
+    expect(names).toEqual([...names].sort());
+    for (const member of res.body) {
+      expect(Object.keys(member).sort()).toEqual(['id', 'name']);
+    }
+  });
+
+  it('a REQUESTER gets 403', async () => {
+    const res = await requesterAgent.get('/api/staff/members');
+    expect(res.status).toBe(403);
+  });
+
+  it('an unauthenticated request gets 401', async () => {
+    const res = await request(app).get('/api/staff/members');
+    expect(res.status).toBe(401);
+  });
 });
