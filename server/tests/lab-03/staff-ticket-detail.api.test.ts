@@ -82,6 +82,14 @@ describe("IT Staff Ticket Detail (API-15, API-16, API-17)", () => {
       expect(res.body.requester).toBeDefined();
     });
 
+    it("SEC-01: never includes the requester's passwordHash (found while capturing Part 7 curl evidence — `include: { requester: true }` was fetching the full User row, including its hash, into every ticket response)", async () => {
+      const ticket = await createFreshTicket();
+      const res = await staffAgent.get(`/api/staff/tickets/${ticket.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.requester.passwordHash).toBeUndefined();
+      expect(JSON.stringify(res.body)).not.toMatch(/passwordHash/i);
+    });
+
     it("403 for Requester", async () => {
       const ticket = await createFreshTicket();
       const res = await requesterAgent.get(`/api/staff/tickets/${ticket.id}`);

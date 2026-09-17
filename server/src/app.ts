@@ -64,6 +64,17 @@ const RESOLUTION_SIGNAL_BLOCKED_STATUSES: TicketStatus[] = [
   TicketStatus.CANCELLED,
 ];
 
+// Found while capturing Part 7 curl evidence for I-7: every `include:
+// { requester: true }` below fetches the FULL User row — including
+// `passwordHash` — into the ticket object, which every serializer then
+// spreads verbatim into the JSON response. For the Requester-facing routes
+// this leaked a user's own hash back to themselves; for the new I-7 staff
+// routes it leaked ANY requester's hash to ANY IT Staff/Administrator, a
+// materially worse exposure. Pre-existing since I-2, surfaced now rather
+// than left for I-8. Fixed by selecting only the fields any response
+// actually renders, everywhere a ticket's requester is included.
+const SAFE_REQUESTER_SELECT = { id: true, name: true, email: true, department: true } as const;
+
 // The Prisma field is `requestedPriority` (Lab 3), but the Lab 2 client and
 // its existing tests still read `priority` (Title-Case) and `status`
 // (Title-Case/underscore) from API responses. This keeps the wire contract
@@ -396,7 +407,7 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
       include: {
         category: true,
         relatedSystem: true,
-        requester: true,
+        requester: { select: SAFE_REQUESTER_SELECT },
         attachments: {
           where: { isRemoved: false },
         },
@@ -472,7 +483,7 @@ async function findOwnedTicketOr404(res: Response, id: number, requesterId: numb
         include: {
           category: true,
           relatedSystem: true,
-          requester: true,
+          requester: { select: SAFE_REQUESTER_SELECT },
           attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
         },
       }),
@@ -599,7 +610,7 @@ app.patch("/api/tickets/:id", requireAuth, requirePasswordChanged, requireOwnedT
       include: {
         category: true,
         relatedSystem: true,
-        requester: true,
+        requester: { select: SAFE_REQUESTER_SELECT },
         attachments: {
           where: { isRemoved: false },
         },
@@ -834,7 +845,7 @@ app.post(
         include: {
           category: true,
           relatedSystem: true,
-          requester: true,
+          requester: { select: SAFE_REQUESTER_SELECT },
           attachments: true,
         },
       });
@@ -1327,7 +1338,7 @@ async function findStaffTicketOr404(res: Response, id: number) {
         include: {
           category: true,
           relatedSystem: true,
-          requester: true,
+          requester: { select: SAFE_REQUESTER_SELECT },
           owner: { select: { id: true, name: true } },
           attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
         },

@@ -62,6 +62,7 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-18f | API | BR-05 | Resolution-signal idempotency (added in review of PR #66 — no test called the route twice on the same still-open ticket) | A second call on the same open ticket returns 409, does not overwrite the timestamp, and does not create a duplicate comment | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-19 | API | BR-04, BR-21, BR-22, BR-23, BR-32 | Public Comments CRUD (create/list only) | Append-only (no PATCH/DELETE route); author/timestamp server-set; rejects blank/oversize content; 404 for non-owning Requester; 401 unauthenticated | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-20 | API | BR-04, BR-21 | Internal Notes CRUD (create/list only) | Staff/Admin only; append-only; same validation as comments | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| SEC-01 | Security | (found capturing I-7's Part 7 curl evidence, not from a written requirement — every `include: { requester: true }` fetched the full `User` row, including `passwordHash`, into the ticket response; three Requester-facing routes since I-2, plus the new I-7 staff-detail route) | No ticket response ever includes `passwordHash` | `res.body.requester.passwordHash` is `undefined` and the raw JSON contains no `passwordHash` string, for both the Requester's own ticket detail and the staff detail route | `server/tests/lab-02/ticket-detail.api.test.ts`, `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
 | API-21 | API | FR-20 | Admin user list — search/role filter | Correct filtering; non-Admin → 403 | `server/tests/lab-03/users-admin.api.test.ts` | |
 | API-22 | API | AC-11, BR-26 | Create user — duplicate email | 409, case-insensitive match, no user created | `server/tests/lab-03/users-admin.api.test.ts` | |
 | API-23 | API | FR-24 | Create user — invalid role | 400 | `server/tests/lab-03/users-admin.api.test.ts` | |
@@ -98,6 +99,27 @@ Security/Authorization · Migration/Regression · End-to-End.
 | E2E-04 | E2E | FR-20–FR-23 | Full admin workflow | Create user → set initial password → that user's forced change at next login | `e2e/lab-03/user-administration.spec.ts` | |
 
 ---
+
+## Part 7 Direct API Authorization Evidence
+
+Cookie-jar `curl` transcripts (D-01: the session is an httpOnly cookie, so
+there is no bearer token to paste) captured 2026-09-17 against a running
+local server and the real dev database, per `sprint-plan.md` §6:
+`artifacts/lab-03/curl-transcripts-i7.txt`. Covers all six required
+scenarios (Requester → internal notes 403 with no note content; Requester →
+staff queue 403; Requester → another Requester's ticket 404 masking per
+BR-32; IT Staff → admin users; unauthenticated → 401;
+`mustChangePassword` user → 403), plus a bonus I-7 positive-path transcript
+(claim → illegal transition 409 with permitted set).
+
+The IT-Staff-→-admin-users scenario currently returns a route-not-found 404
+rather than a role-based 403, because `/api/admin/users` is I-8's scope and
+has not been built yet; this is recorded honestly in the transcript itself
+rather than faked, and will be re-captured with a real 403 once I-8 lands.
+
+Capturing this transcript is also what surfaced SEC-01 above (the
+`passwordHash` leak) — the transcript file documents the finding, the fix,
+and a re-run of the same request confirming it.
 
 ## Screenshot / Visual Evidence Traceability
 

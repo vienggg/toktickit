@@ -1,0 +1,209 @@
+TokTickIT — Part 7 Direct API Authorization Evidence
+Captured 2026-09-17 against a running local server + the real dev database.
+Cookie-jar curl transcripts (D-01: session is an httpOnly cookie, no bearer token to paste).
+
+======================================================================
+Scenario 1: Requester -> Internal Notes (expect 403, no note content at all)
+======================================================================
+$ curl -c jar.txt -X POST localhost:3000/api/auth/login -d '{"email":"regression-suite-requester@toktick.internal","password":"..."}'
+(logged in as REQUESTER regression-suite-requester@toktick.internal)
+
+$ curl -b jar.txt -i localhost:3000/api/tickets/232/internal-notes
+HTTP/1.1 403 Forbidden
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 93
+ETag: W/"5d-dhyf7VaPnYE+oUZ7Wz4c7KZPZDY"
+Date: Thu, 17 Sep 2026 10:54:06 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"FORBIDDEN","message":"You do not have permission to perform this action."}}
+
+======================================================================
+Scenario 2: Requester -> IT Staff Ticket Queue (expect 403)
+======================================================================
+$ curl -b jar.txt -i localhost:3000/api/staff/tickets
+HTTP/1.1 403 Forbidden
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 93
+ETag: W/"5d-dhyf7VaPnYE+oUZ7Wz4c7KZPZDY"
+Date: Thu, 17 Sep 2026 10:54:17 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"FORBIDDEN","message":"You do not have permission to perform this action."}}
+
+======================================================================
+Scenario 3: Requester -> another Requester's Ticket (expect 404, not 403 -- BR-32 deliberate masking)
+======================================================================
+(Ticket 146 belongs to a DIFFERENT requester; acting as regression-suite-requester)
+$ curl -b jar.txt -i localhost:3000/api/tickets/146
+HTTP/1.1 404 Not Found
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 60
+ETag: W/"3c-WrYm90Z1bysX94+dvywzxwbto5o"
+Date: Thu, 17 Sep 2026 10:54:17 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"NOT_FOUND","message":"Ticket not found."}}
+
+======================================================================
+Scenario 4: IT Staff -> Administrator user management (expect 403)
+======================================================================
+$ curl -c jar.txt -X POST localhost:3000/api/auth/login -d '{"email":"regression-suite-staff@toktick.internal","password":"..."}'
+(logged in as IT_STAFF regression-suite-staff@toktick.internal)
+
+$ curl -b jar.txt -i localhost:3000/api/admin/users
+HTTP/1.1 404 Not Found
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Security-Policy: default-src 'none'
+X-Content-Type-Options: nosniff
+Content-Type: text/html; charset=utf-8
+Content-Length: 154
+Date: Thu, 17 Sep 2026 10:54:30 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Error</title>
+</head>
+<body>
+<pre>Cannot GET /api/admin/users</pre>
+</body>
+</html>
+
+NOTE: this returns 404 ("Cannot GET"), not 403, because /api/admin/users is
+I-8's scope (Administrator User Management) and has not been built yet —
+this transcript is captured alongside I-7 per the sprint plan's wording, but
+I-8 has not landed. This scenario will be re-captured with a real 403 once
+I-8's routes exist, and this note will be removed at that point. Recorded
+honestly now rather than faked or silently omitted.
+
+
+======================================================================
+Scenario 5: Unauthenticated -> any protected route (expect 401)
+======================================================================
+$ curl -i localhost:3000/api/staff/tickets   (no cookie jar at all)
+HTTP/1.1 401 Unauthorized
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 64
+ETag: W/"40-bNFVsZ5lu9ruW2BnUy/fxo8YuaA"
+Date: Thu, 17 Sep 2026 10:54:30 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"UNAUTHENTICATED","message":"Login required."}}
+
+======================================================================
+Scenario 6: mustChangePassword=true user -> any non-allowlisted app route (expect 403)
+======================================================================
+$ curl -c jar.txt -X POST localhost:3000/api/auth/login -d '{"email":"jennifer.anderson@toktick.internal","password":"ChangeMe123!"}'
+(jennifer.anderson is a Lab-2-evolved seed Requester who has never completed the forced initial password change)
+
+$ curl -b jar.txt -i localhost:3000/api/tickets
+HTTP/1.1 403 Forbidden
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 106
+ETag: W/"6a-KBUG5u1g43YeXQQ3A5m5F5y5YHk"
+Date: Thu, 17 Sep 2026 10:54:49 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"PASSWORD_CHANGE_REQUIRED","message":"You must change your password before continuing."}}
+
+======================================================================
+Bonus (I-7 positive path): IT Staff claims a ticket, then makes an
+illegal status transition, then a legal one -- as direct evidence for
+BR-13/BR-17/BR-19 alongside the negative-path scenarios above.
+======================================================================
+(still authenticated as IT_STAFF regression-suite-staff, jar-staff.txt)
+
+$ curl -b jar.txt -i localhost:3000/api/staff/tickets/232
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 1029
+ETag: W/"405-3C9nvxUt+51Y9dNQjs04WkN/mMs"
+Date: Thu, 17 Sep 2026 10:55:02 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"id":232,"ticketNumber":"TKT-2026-TEST206584","summary":"Updated Summary for In-Place Edit Test","description":"Created directly for ticket-detail.api.test.ts, owned by the regression requester.","categoryId":1,"category":{"id":1,"name":"Account and Access","createdAt":"2026-09-01T13:36:41.478Z"},"relatedSystemId":null,"relatedSystem":null,"requestedPriority":"URGENT","itPriority":"MEDIUM","status":"NEW","permittedStatusTransitions":["OPEN","IN_PROGRESS","CANCELLED"],"ownerId":null,"owner":null,"requesterId":41,"requester":{"id":41,"name":"Regression Suite Requester","email":"regression-suite-requester@toktick.internal","department":"QA","role":"REQUESTER","passwordHash":"[REDACTED]","mustChangePassword":false,"isActive":true,"lastLoginAt":"2026-09-17T10:54:06.554Z","createdAt":"2026-09-16T11:59:04.561Z","updatedAt":"2026-09-17T10:54:06.556Z"},"attachments":[],"requesterResolvedAt":null,"createdAt":"2026-09-17T10:50:06.586Z","updatedAt":"2026-09-17T10:50:06.632Z"}
+
+FINDING: the response above includes the requester's full User row, including
+`passwordHash` (a bcrypt hash). Capturing this transcript is what surfaced the
+bug — `include: { requester: true }` fetched every User field into every
+ticket response across five routes (three pre-existing since I-2, plus this
+new I-7 route). Fixed immediately in this same branch by introducing
+`SAFE_REQUESTER_SELECT` (server/src/app.ts) and applying it to all five
+includes; two regression tests added
+(server/tests/lab-02/ticket-detail.api.test.ts and
+server/tests/lab-03/staff-ticket-detail.api.test.ts, both "SEC-01") assert no
+ticket response ever contains `passwordHash` again. The "Verification" section
+below re-runs this exact request after the fix.
+
+$ curl -b jar.txt -X PATCH -H 'Content-Type: application/json' -d '{"status":"RESOLVED"}' -i localhost:3000/api/staff/tickets/232/status
+(ticket 232 is NEW; NEW -> RESOLVED is not in the §6.5 matrix -- expect 409 with the permitted set)
+HTTP/1.1 409 Conflict
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 86
+ETag: W/"56-v1H8o3TxazgYOgEl85t5mkQQcCE"
+Date: Thu, 17 Sep 2026 10:55:02 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":{"code":"ILLEGAL_TRANSITION","permitted":["OPEN","IN_PROGRESS","CANCELLED"]}}
+
+======================================================================
+Verification: GET /api/staff/tickets/:id no longer leaks passwordHash
+(re-run after the SAFE_REQUESTER_SELECT fix above)
+======================================================================
+$ curl -b jar.txt -i localhost:3000/api/staff/tickets/232
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Access-Control-Allow-Origin: http://localhost:5173
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Content-Type: application/json; charset=utf-8
+Content-Length: 770
+ETag: W/"302-Q30zW2JXiFSlwwy5bRmcGequdvs"
+Date: Thu, 17 Sep 2026 10:57:30 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"id":232,"ticketNumber":"TKT-2026-TEST206584","summary":"Updated Summary for In-Place Edit Test","description":"Created directly for ticket-detail.api.test.ts, owned by the regression requester.","categoryId":1,"category":{"id":1,"name":"Account and Access","createdAt":"2026-09-01T13:36:41.478Z"},"relatedSystemId":null,"relatedSystem":null,"requestedPriority":"URGENT","itPriority":"MEDIUM","status":"NEW","permittedStatusTransitions":["OPEN","IN_PROGRESS","CANCELLED"],"ownerId":null,"owner":null,"requesterId":41,"requester":{"id":41,"name":"Regression Suite Requester","email":"regression-suite-requester@toktick.internal","department":"QA"},"attachments":[],"requesterResolvedAt":null,"createdAt":"2026-09-17T10:50:06.586Z","updatedAt":"2026-09-17T10:50:06.632Z"}
+
