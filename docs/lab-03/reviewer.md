@@ -19,7 +19,8 @@
 | [#63](https://github.com/vienggg/toktickit/pull/63) | feat(lab3): data model, migration, and seed for Users, Roles, and Ticket workflow | `feature/lab3-user-model-and-migration` | `lab3-staging` | Approved & Merged |
 | [#64](https://github.com/vienggg/toktickit/pull/64) | feat(lab3): authentication foundation — login, logout, me, change-password | `feature/lab3-auth-foundation` | `lab3-staging` | Approved & Merged |
 | [#65](https://github.com/vienggg/toktickit/pull/65) | feat(lab3): auth UI, routing, and Requester regression | `feature/lab3-auth-shell-and-regression` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
-| [#66](https://github.com/vienggg/toktickit/pull/66) | feat(lab3): Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Changes Requested → Fixing → re-review pending |
+| [#66](https://github.com/vienggg/toktickit/pull/66) | feat(lab3): Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
+| [#67](https://github.com/vienggg/toktickit/pull/67) | feat(lab3): IT Staff Ticket Queue | `feature/lab3-staff-queue` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
@@ -132,6 +133,56 @@ what this document says.
 > routes. (8) `authorRole` is now rendered as a small badge next to the
 > author's name for any non-Requester author. All 82 server tests (+1 new)
 > and 19 client tests pass.
+
+#### PR #67: IT Staff Ticket Queue — Changes Requested (@projectnewy, 2026-09-17)
+
+> **Reviewer Feedback:** Eight findings, two blocking. (1) the "Open"
+> action's default `navigate('/staff/tickets/:id')` pointed at a route that
+> does not exist in `App.tsx`, so every click on the queue's one specified
+> action silently fell through to the Requester's own workspace instead of
+> a ticket detail view — and no test exercised the click at all. (2) the
+> Owner filter only offered "All"/"Unassigned" even though the API and
+> `ui-spec.md` both call for a real per-staff-member picker, and there was
+> no endpoint that could supply that roster (`/api/admin/users` is
+> Administrator-only). (3) `categoryId`/`ownerId`/`page` each hand-rolled
+> `/^\d+$/` validation instead of reusing `parseStrictId`, and `page` had
+> no upper bound the way `pageSize` did, so an absurd `page` value could
+> reach Prisma as a huge `skip` and surface as an unhandled 500. (4) the
+> new screen re-implemented `MyTickets.tsx`'s search debounce, categories
+> fetch, and fetch/loading/error shape wholesale rather than sharing it,
+> and had already drifted (missing `parseApiError`). (5) a stale page with
+> zero rows on it (e.g. after ownership churn) rendered fully blank with no
+> Prev/Next to recover. (6) sortable column headers only existed on the
+> desktop table, not the tablet layout. (7) the response included
+> `description` and the requester's email though the UI never rendered
+> them. (8) the staff-tickets query building duplicated `GET
+> /api/tickets`'s pagination/count/findMany shape independently.
+>
+> **Author Response (@vienggg):** All eight addressed on the same branch.
+> (1) `handleOpen` now opens a read-only detail modal populated from the
+> already-fetched queue row — deliberately not I-7's full staff detail
+> screen (ownership panel, status transitions, internal notes; that's
+> issue #56, not yet started, with its own undocumented-until-then `GET
+> /api/staff/tickets/:id`). Added a row-click → modal test. (2) Added `GET
+> /api/staff/members` (IT_STAFF/ADMINISTRATOR only, active roster,
+> `[{id, name}]`), documented in `api-spec.md` §4, and wired the picker to
+> it. (3) `categoryId`/`ownerId` now reuse `parseStrictId`; `page` is
+> capped at 100000 with the same 400 shape as every other invalid param;
+> added a huge-`page` test. (4) Extracted the debounce, categories fetch,
+> and generic paginated-fetch/loading/error state machine into
+> `client/src/hooks/usePaginatedFetch.ts`, shared by both `MyTickets.tsx`
+> and `StaffTicketQueue.tsx`, fixing the `parseApiError` drift. (5)
+> Pagination controls now render whenever `pagination.total > 0`
+> regardless of the current page's row count, and a stale out-of-range
+> `page` auto-clamps back instead of rendering blank. (6) The tablet
+> table gained the same sortable-header affordance as the desktop table.
+> (7) Dropped the unused `requesterEmail` field; kept `description` and
+> `requesterName` since the new modal renders both. (8) Extracted
+> `fetchPaginatedTickets` as a shared pagination/count/findMany core for
+> both `GET /api/tickets` and `GET /api/staff/tickets`, matching the
+> `fetchAuthorizedTicketOr404` core-plus-thin-call-sites shape from the
+> last two reviews. 103 server tests (+4 new) and 27 client tests (+2 new)
+> pass.
 
 ---
 
