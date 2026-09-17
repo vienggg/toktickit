@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
-import { RequireAuth, RedirectIfAuthenticated } from './components/ProtectedRoute';
+import { RequireAuth, RequireRole, RedirectIfAuthenticated } from './components/ProtectedRoute';
 import { Navbar } from './components/Navbar';
 import { Login } from './components/Login';
 import { ChangePassword } from './components/ChangePassword';
 import { CreateTicket } from './components/CreateTicket';
 import { MyTickets } from './components/MyTickets';
 import { TicketDetail } from './components/TicketDetail';
+import { StaffTicketQueue } from './components/StaffTicketQueue';
 
 function RequesterWorkspace() {
   const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
@@ -65,6 +66,16 @@ export default function App() {
             element={
               <RequireAuth>
                 <ChangePassword />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/staff/queue"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['IT_STAFF', 'ADMINISTRATOR']}>
+                  <StaffTicketQueue />
+                </RequireRole>
               </RequireAuth>
             }
           />

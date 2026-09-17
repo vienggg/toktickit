@@ -12,6 +12,7 @@ import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
 import {
   requireAuth,
   requirePasswordChanged,
+  requireRole,
   issueSessionCookie,
   clearSessionCookie,
 } from "./auth.js";
@@ -1044,6 +1045,190 @@ app.post(
     } catch (err) {
       console.error("Resolution signal error:", err);
       return res.status(500).json({ error: "Failed to record resolution signal" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-6) — IT Staff Ticket Queue
+// ---------------------------------------------------------------------------
+
+// The staff queue needs the full 8-value TicketStatus/4-value Priority enums
+// and owner information verbatim — serializeTicket above deliberately
+// collapses status/priority back to the Lab 2 legacy casing for the
+// Requester-facing routes, which would silently drop the 4 new statuses
+// (OPEN, WAITING_FOR_REQUESTER, REOPENED, CANCELLED) this screen must show.
+// This is therefore a separate, small projection rather than a reuse of
+// serializeTicket, per api-spec.md §4 (raw enum values on the wire here).
+function serializeStaffTicket(ticket: {
+  id: number;
+  ticketNumber: string;
+  summary: string;
+  description: string;
+  requestedPriority: Priority;
+  itPriority: Priority;
+  status: TicketStatus;
+  categoryId: number;
+  category: { id: number; name: string };
+  ownerId: number | null;
+  owner: { id: number; name: string } | null;
+  requesterId: number;
+  requester: { id: number; name: string; email: string };
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    summary: ticket.summary,
+    description: ticket.description,
+    categoryId: ticket.categoryId,
+    category: ticket.category,
+    requestedPriority: ticket.requestedPriority,
+    itPriority: ticket.itPriority,
+    status: ticket.status,
+    ownerId: ticket.ownerId,
+    ownerName: ticket.owner?.name ?? null,
+    requesterId: ticket.requesterId,
+    requesterName: ticket.requester.name,
+    requesterEmail: ticket.requester.email,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+  };
+}
+
+const STAFF_QUEUE_SORT_FIELDS = ["createdAt", "updatedAt", "itPriority", "status", "ticketNumber"] as const;
+type StaffQueueSortField = (typeof STAFF_QUEUE_SORT_FIELDS)[number];
+
+function validationError(field: string, message: string) {
+  return { error: { code: "VALIDATION_ERROR", message: `Invalid '${field}': ${message}` } };
+}
+
+app.get(
+  "/api/staff/tickets",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize } = req.query;
+
+      const where: Prisma.TicketWhereInput = {};
+
+      if (status !== undefined && status !== "All") {
+        if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
+          return res.status(400).json(validationError("status", "must be a valid TicketStatus or 'All'."));
+        }
+        where.status = status as TicketStatus;
+      }
+
+      if (itPriority !== undefined && itPriority !== "All") {
+        if (typeof itPriority !== "string" || !(Object.values(Priority) as string[]).includes(itPriority)) {
+          return res.status(400).json(validationError("itPriority", "must be a valid Priority or 'All'."));
+        }
+        where.itPriority = itPriority as Priority;
+      }
+
+      if (categoryId !== undefined) {
+        if (typeof categoryId !== "string" || !/^\d+$/.test(categoryId)) {
+          return res.status(400).json(validationError("categoryId", "must be an integer."));
+        }
+        where.categoryId = parseInt(categoryId, 10);
+      }
+
+      if (ownerId !== undefined) {
+        if (ownerId === "unassigned") {
+          where.ownerId = null;
+        } else if (typeof ownerId === "string" && /^\d+$/.test(ownerId)) {
+          where.ownerId = parseInt(ownerId, 10);
+        } else {
+          return res.status(400).json(validationError("ownerId", "must be an integer or 'unassigned'."));
+        }
+      }
+
+      if (search !== undefined) {
+        if (typeof search !== "string") {
+          return res.status(400).json(validationError("search", "must be a string."));
+        }
+        const query = search.trim();
+        if (query.length > 0) {
+          where.OR = [
+            { ticketNumber: { contains: query, mode: "insensitive" } },
+            { summary: { contains: query, mode: "insensitive" } },
+            { description: { contains: query, mode: "insensitive" } },
+            { requester: { name: { contains: query, mode: "insensitive" } } },
+            { requester: { email: { contains: query, mode: "insensitive" } } },
+          ];
+        }
+      }
+
+      // Default ordering is updatedAt desc per api-spec.md §4.
+      let sortField: StaffQueueSortField = "updatedAt";
+      if (sort !== undefined) {
+        if (typeof sort !== "string" || !(STAFF_QUEUE_SORT_FIELDS as readonly string[]).includes(sort)) {
+          return res.status(400).json(validationError("sort", `must be one of ${STAFF_QUEUE_SORT_FIELDS.join(", ")}.`));
+        }
+        sortField = sort as StaffQueueSortField;
+      }
+
+      let sortOrder: Prisma.SortOrder = "desc";
+      if (order !== undefined) {
+        if (order !== "asc" && order !== "desc") {
+          return res.status(400).json(validationError("order", "must be 'asc' or 'desc'."));
+        }
+        sortOrder = order;
+      }
+
+      let pageNum = 1;
+      if (page !== undefined) {
+        if (typeof page !== "string" || !/^\d+$/.test(page) || parseInt(page, 10) < 1) {
+          return res.status(400).json(validationError("page", "must be a positive integer."));
+        }
+        pageNum = parseInt(page, 10);
+      }
+
+      let pageSizeNum = 10;
+      if (pageSize !== undefined) {
+        if (typeof pageSize !== "string" || !/^\d+$/.test(pageSize) || parseInt(pageSize, 10) < 1) {
+          return res.status(400).json(validationError("pageSize", "must be a positive integer."));
+        }
+        pageSizeNum = parseInt(pageSize, 10);
+        if (pageSizeNum > 50) {
+          return res.status(400).json(validationError("pageSize", "must not exceed 50."));
+        }
+      }
+
+      const skip = (pageNum - 1) * pageSizeNum;
+
+      const [total, tickets] = await Promise.all([
+        getPrisma().ticket.count({ where }),
+        getPrisma().ticket.findMany({
+          where,
+          orderBy: { [sortField]: sortOrder },
+          skip,
+          take: pageSizeNum,
+          include: {
+            category: { select: { id: true, name: true } },
+            owner: { select: { id: true, name: true } },
+            requester: { select: { id: true, name: true, email: true } },
+          },
+        }),
+      ]);
+
+      const totalPages = Math.max(1, Math.ceil(total / pageSizeNum));
+
+      return res.status(200).json({
+        data: tickets.map(serializeStaffTicket),
+        pagination: {
+          page: pageNum,
+          pageSize: pageSizeNum,
+          total,
+          totalPages,
+        },
+      });
+    } catch (err) {
+      console.error("Staff ticket queue error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch the ticket queue." } });
     }
   }
 );

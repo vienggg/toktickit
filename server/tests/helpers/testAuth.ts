@@ -87,3 +87,41 @@ export async function loginAsRegressionOtherRequester() {
   }
   return agent;
 }
+
+// Dedicated fixture account for IT Staff Ticket Queue (I-6) and other
+// staff-only route tests. Same rationale as the Requester fixtures above —
+// a dedicated account with mustChangePassword already false, kept separate
+// from prisma/seed.ts data.
+export const REGRESSION_STAFF_EMAIL = "regression-suite-staff@toktick.internal";
+export const REGRESSION_STAFF_PASSWORD = "RegressionTest789";
+
+export async function ensureRegressionStaff() {
+  const prisma = getPrisma();
+  return prisma.user.upsert({
+    where: { email: REGRESSION_STAFF_EMAIL },
+    update: { isActive: true, mustChangePassword: false, role: Role.IT_STAFF, passwordHash: hashPassword(REGRESSION_STAFF_PASSWORD) },
+    create: {
+      name: "Regression Suite Staff",
+      email: REGRESSION_STAFF_EMAIL,
+      department: "IT",
+      role: Role.IT_STAFF,
+      passwordHash: hashPassword(REGRESSION_STAFF_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+}
+
+/** Returns a supertest agent already logged in as the regression IT Staff fixture. */
+export async function loginAsRegressionStaff() {
+  await ensureRegressionStaff();
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_STAFF_EMAIL,
+    password: REGRESSION_STAFF_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression staff: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}
