@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiFetch, parseApiError } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { useStaffMembers, useSavingAction, formatDate } from '../hooks/usePaginatedFetch';
+import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
 
 interface Attachment {
   id: number;
@@ -53,11 +55,6 @@ interface StaffTicketDetailData {
   updatedAt: string;
 }
 
-interface StaffMember {
-  id: number;
-  name: string;
-}
-
 interface CommentOrNote {
   id: number;
   ticketId: number;
@@ -73,6 +70,10 @@ const ROLE_LABEL: Record<string, string> = {
   IT_STAFF: 'IT Staff',
   ADMINISTRATOR: 'Administrator',
 };
+
+// Used only by the Internal Notes panel below now — the Public Comments
+// panel's own role-label rendering moved into PublicCommentsPanel.tsx
+// (review of PR #68, item 5).
 
 const PRIORITY_OPTIONS: Priority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
 
@@ -94,20 +95,6 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -121,32 +108,30 @@ export const StaffTicketDetail: React.FC = () => {
   const ticketId = id ? parseInt(id, 10) : NaN;
 
   const [ticket, setTicket] = useState<StaffTicketDetailData | null>(null);
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  // Item 7 fix (review of PR #68): the staff roster fetch is now shared
+  // with StaffTicketQueue.tsx via useStaffMembers instead of each screen
+  // independently hitting GET /api/staff/members.
+  const staffMembers = useStaffMembers();
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Ownership & Priority panel state
+  // Ownership & Priority panel state. Item 9 fix (review of PR #68): the
+  // save/error/success boilerplate that used to be hand-rolled separately
+  // for owner, IT priority, and status is now the shared useSavingAction
+  // hook — one instance per control, since each has its own independent
+  // saving/error/success lifecycle.
   const [ownerSelection, setOwnerSelection] = useState<string>('');
-  const [isSavingOwner, setIsSavingOwner] = useState(false);
-  const [ownerError, setOwnerError] = useState<string | null>(null);
-  const [ownerSuccess, setOwnerSuccess] = useState<string | null>(null);
+  const ownerAction = useSavingAction();
 
   const [itPrioritySelection, setItPrioritySelection] = useState<Priority>('MEDIUM');
-  const [isSavingPriority, setIsSavingPriority] = useState(false);
-  const [priorityError, setPriorityError] = useState<string | null>(null);
-  const [prioritySuccess, setPrioritySuccess] = useState<string | null>(null);
+  const priorityAction = useSavingAction();
 
   // Status control state
   const [statusSelection, setStatusSelection] = useState<string>('');
-  const [isSavingStatus, setIsSavingStatus] = useState(false);
-  const [statusError, setStatusError] = useState<string | null>(null);
-  const [statusSuccess, setStatusSuccess] = useState<string | null>(null);
+  const statusAction = useSavingAction();
 
   // Public Comments state
-  const [comments, setComments] = useState<CommentOrNote[]>([]);
-  const [newComment, setNewComment] = useState('');
-  const [isPostingComment, setIsPostingComment] = useState(false);
-  const [commentError, setCommentError] = useState<string | null>(null);
+  const [comments, setComments] = useState<PublicCommentData[]>([]);
 
   // Internal Notes state
   const [notes, setNotes] = useState<CommentOrNote[]>([]);
@@ -184,12 +169,10 @@ export const StaffTicketDetail: React.FC = () => {
       try {
         await fetchTicket(controller.signal);
 
-        const [membersRes, commentsRes, notesRes] = await Promise.all([
-          apiFetch('/api/staff/members', { signal: controller.signal }),
+        const [commentsRes, notesRes] = await Promise.all([
           apiFetch(`/api/tickets/${ticketId}/comments`, { signal: controller.signal }),
           apiFetch(`/api/tickets/${ticketId}/internal-notes`, { signal: controller.signal }),
         ]);
-        if (membersRes.ok) setStaffMembers(await membersRes.json());
         if (commentsRes.ok) setComments(await commentsRes.json());
         if (notesRes.ok) setNotes(await notesRes.json());
       } catch (err: unknown) {
@@ -214,29 +197,24 @@ export const StaffTicketDetail: React.FC = () => {
   };
 
   const submitOwner = async (ownerIdValue: string) => {
-    setOwnerError(null);
-    setOwnerSuccess(null);
-    setIsSavingOwner(true);
-    try {
-      const payload = { ownerId: ownerIdValue === '' ? null : parseInt(ownerIdValue, 10) };
-      const res = await apiFetch(`/api/staff/tickets/${ticketId}/owner`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        throw new Error(await parseApiError(res, 'Failed to update ticket owner.'));
-      }
-      const updated: StaffTicketDetailData = await res.json();
-      setTicket(updated);
-      setOwnerSelection(updated.ownerId ? String(updated.ownerId) : '');
-      setOwnerSuccess('Owner updated.');
-      setTimeout(() => setOwnerSuccess(null), 3000);
-    } catch (err) {
-      setOwnerError(err instanceof Error ? err.message : 'Failed to update ticket owner.');
-    } finally {
-      setIsSavingOwner(false);
-    }
+    await ownerAction.run(
+      async () => {
+        const payload = { ownerId: ownerIdValue === '' ? null : parseInt(ownerIdValue, 10) };
+        const res = await apiFetch(`/api/staff/tickets/${ticketId}/owner`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          throw new Error(await parseApiError(res, 'Failed to update ticket owner.'));
+        }
+        const updated: StaffTicketDetailData = await res.json();
+        setTicket(updated);
+        setOwnerSelection(updated.ownerId ? String(updated.ownerId) : '');
+      },
+      'Owner updated.',
+      'Failed to update ticket owner.'
+    );
   };
 
   const handleReassignChange = (value: string) => {
@@ -245,85 +223,43 @@ export const StaffTicketDetail: React.FC = () => {
   };
 
   const handleSavePriority = async () => {
-    setPriorityError(null);
-    setPrioritySuccess(null);
-    setIsSavingPriority(true);
-    try {
-      const res = await apiFetch(`/api/staff/tickets/${ticketId}/it-priority`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itPriority: itPrioritySelection }),
-      });
-      if (!res.ok) {
-        throw new Error(await parseApiError(res, 'Failed to update IT priority.'));
-      }
-      const updated: StaffTicketDetailData = await res.json();
-      setTicket(updated);
-      setPrioritySuccess('IT Priority updated.');
-      setTimeout(() => setPrioritySuccess(null), 3000);
-    } catch (err) {
-      setPriorityError(err instanceof Error ? err.message : 'Failed to update IT priority.');
-    } finally {
-      setIsSavingPriority(false);
-    }
+    await priorityAction.run(
+      async () => {
+        const res = await apiFetch(`/api/staff/tickets/${ticketId}/it-priority`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itPriority: itPrioritySelection }),
+        });
+        if (!res.ok) {
+          throw new Error(await parseApiError(res, 'Failed to update IT priority.'));
+        }
+        const updated: StaffTicketDetailData = await res.json();
+        setTicket(updated);
+      },
+      'IT Priority updated.',
+      'Failed to update IT priority.'
+    );
   };
 
   const handleApplyStatus = async () => {
     if (!statusSelection) return;
-    setStatusError(null);
-    setStatusSuccess(null);
-    setIsSavingStatus(true);
-    try {
-      const res = await apiFetch(`/api/staff/tickets/${ticketId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: statusSelection }),
-      });
-      if (!res.ok) {
-        throw new Error(await parseApiError(res, 'Failed to update ticket status.'));
-      }
-      const updated: StaffTicketDetailData = await res.json();
-      setTicket(updated);
-      setStatusSelection('');
-      setStatusSuccess('Status updated.');
-      setTimeout(() => setStatusSuccess(null), 3000);
-    } catch (err) {
-      setStatusError(err instanceof Error ? err.message : 'Failed to update ticket status.');
-    } finally {
-      setIsSavingStatus(false);
-    }
-  };
-
-  const handlePostComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCommentError(null);
-    const trimmed = newComment.trim();
-    if (!trimmed) {
-      setCommentError('Comment cannot be empty.');
-      return;
-    }
-    if (trimmed.length > 2000) {
-      setCommentError('Comment cannot exceed 2000 characters.');
-      return;
-    }
-    setIsPostingComment(true);
-    try {
-      const res = await apiFetch(`/api/tickets/${ticketId}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: trimmed }),
-      });
-      if (!res.ok) {
-        throw new Error(await parseApiError(res, 'Failed to post comment.'));
-      }
-      const created: CommentOrNote = await res.json();
-      setComments((prev) => [...prev, created]);
-      setNewComment('');
-    } catch (err) {
-      setCommentError(err instanceof Error ? err.message : 'Failed to post comment.');
-    } finally {
-      setIsPostingComment(false);
-    }
+    await statusAction.run(
+      async () => {
+        const res = await apiFetch(`/api/staff/tickets/${ticketId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: statusSelection }),
+        });
+        if (!res.ok) {
+          throw new Error(await parseApiError(res, 'Failed to update ticket status.'));
+        }
+        const updated: StaffTicketDetailData = await res.json();
+        setTicket(updated);
+        setStatusSelection('');
+      },
+      'Status updated.',
+      'Failed to update ticket status.'
+    );
   };
 
   const handlePostNote = async (e: React.FormEvent) => {
@@ -445,8 +381,8 @@ export const StaffTicketDetail: React.FC = () => {
           <div className="mt-4 pt-4 border-top">
             <h6 className="fw-bold text-dark mb-3">🧑‍💻 Ownership &amp; Priority</h6>
 
-            {ownerError && <div className="alert alert-danger small py-2 mb-3">{ownerError}</div>}
-            {ownerSuccess && <div className="alert alert-success small py-2 mb-3">{ownerSuccess}</div>}
+            {ownerAction.error && <div className="alert alert-danger small py-2 mb-3">{ownerAction.error}</div>}
+            {ownerAction.success && <div className="alert alert-success small py-2 mb-3">{ownerAction.success}</div>}
 
             <div className="row g-3 align-items-end mb-3">
               <div className="col-md-5">
@@ -458,7 +394,7 @@ export const StaffTicketDetail: React.FC = () => {
                   className="form-select"
                   value={ownerSelection}
                   onChange={(e) => handleReassignChange(e.target.value)}
-                  disabled={isSavingOwner}
+                  disabled={ownerAction.isSaving}
                 >
                   <option value="">Unassigned</option>
                   {staffMembers.map((m) => (
@@ -474,9 +410,9 @@ export const StaffTicketDetail: React.FC = () => {
                     type="button"
                     className="btn btn-zen-outline btn-sm"
                     onClick={handleClaim}
-                    disabled={isSavingOwner}
+                    disabled={ownerAction.isSaving}
                   >
-                    {isSavingOwner ? (
+                    {ownerAction.isSaving ? (
                       <>
                         <span className="spinner-border spinner-border-sm me-1" role="status" /> Claiming...
                       </>
@@ -506,7 +442,7 @@ export const StaffTicketDetail: React.FC = () => {
                   className="form-select"
                   value={itPrioritySelection}
                   onChange={(e) => setItPrioritySelection(e.target.value as Priority)}
-                  disabled={isSavingPriority}
+                  disabled={priorityAction.isSaving}
                 >
                   {PRIORITY_OPTIONS.map((p) => (
                     <option key={p} value={p}>
@@ -520,9 +456,9 @@ export const StaffTicketDetail: React.FC = () => {
                   type="button"
                   className="btn btn-zen-primary btn-sm"
                   onClick={handleSavePriority}
-                  disabled={isSavingPriority || itPrioritySelection === ticket.itPriority}
+                  disabled={priorityAction.isSaving || itPrioritySelection === ticket.itPriority}
                 >
-                  {isSavingPriority ? (
+                  {priorityAction.isSaving ? (
                     <>
                       <span className="spinner-border spinner-border-sm me-1" role="status" /> Saving...
                     </>
@@ -532,8 +468,8 @@ export const StaffTicketDetail: React.FC = () => {
                 </button>
               </div>
             </div>
-            {priorityError && <div className="alert alert-danger small py-2 mt-3 mb-0">{priorityError}</div>}
-            {prioritySuccess && <div className="alert alert-success small py-2 mt-3 mb-0">{prioritySuccess}</div>}
+            {priorityAction.error && <div className="alert alert-danger small py-2 mt-3 mb-0">{priorityAction.error}</div>}
+            {priorityAction.success && <div className="alert alert-success small py-2 mt-3 mb-0">{priorityAction.success}</div>}
           </div>
 
           {/* Status control — only the transitions permitted from the
@@ -543,8 +479,8 @@ export const StaffTicketDetail: React.FC = () => {
               matrix. */}
           <div className="mt-4 pt-4 border-top">
             <h6 className="fw-bold text-dark mb-3">🔄 Status</h6>
-            {statusError && <div className="alert alert-danger small py-2 mb-3">{statusError}</div>}
-            {statusSuccess && <div className="alert alert-success small py-2 mb-3">{statusSuccess}</div>}
+            {statusAction.error && <div className="alert alert-danger small py-2 mb-3">{statusAction.error}</div>}
+            {statusAction.success && <div className="alert alert-success small py-2 mb-3">{statusAction.success}</div>}
 
             {ticket.permittedStatusTransitions.length === 0 ? (
               <p className="text-muted small mb-0">
@@ -561,7 +497,7 @@ export const StaffTicketDetail: React.FC = () => {
                     className="form-select"
                     value={statusSelection}
                     onChange={(e) => setStatusSelection(e.target.value)}
-                    disabled={isSavingStatus}
+                    disabled={statusAction.isSaving}
                   >
                     <option value="">Select a status…</option>
                     {ticket.permittedStatusTransitions.map((s) => (
@@ -575,9 +511,9 @@ export const StaffTicketDetail: React.FC = () => {
                   type="button"
                   className="btn btn-zen-primary btn-sm"
                   onClick={handleApplyStatus}
-                  disabled={isSavingStatus || !statusSelection}
+                  disabled={statusAction.isSaving || !statusSelection}
                 >
-                  {isSavingStatus ? (
+                  {statusAction.isSaving ? (
                     <>
                       <span className="spinner-border spinner-border-sm me-1" role="status" /> Applying...
                     </>
@@ -611,50 +547,16 @@ export const StaffTicketDetail: React.FC = () => {
             )}
           </div>
 
-          {/* Public Comments panel — identical to the Requester's, editable by staff too. */}
-          <div className="mt-4 pt-4 border-top">
-            <h6 className="fw-bold text-dark mb-3">💬 Public Comments</h6>
-            {comments.length === 0 && <p className="text-muted small mb-3">No comments yet on this ticket.</p>}
-            {comments.length > 0 && (
-              <div className="d-flex flex-column gap-2 mb-3">
-                {comments.map((c) => (
-                  <div key={c.id} className="p-3 rounded border" style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)' }}>
-                    <div className="d-flex justify-content-between align-items-center mb-1">
-                      <span className="fw-semibold text-dark small d-flex align-items-center gap-2">
-                        {c.authorName}
-                        <span className="badge bg-secondary" style={{ fontSize: '0.65rem' }}>
-                          {ROLE_LABEL[c.authorRole] ?? c.authorRole}
-                        </span>
-                      </span>
-                      <span className="text-muted small">{formatDate(c.createdAt)}</span>
-                    </div>
-                    <div className="text-dark" style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {commentError && <div className="alert alert-danger small py-2 mb-3">{commentError}</div>}
-            <form onSubmit={handlePostComment}>
-              <label htmlFor="new-comment" className="form-label small fw-semibold text-dark">
-                Add a comment
-              </label>
-              <textarea
-                id="new-comment"
-                className="form-control mb-2"
-                rows={2}
-                maxLength={2000}
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                disabled={isPostingComment}
-                placeholder="Share an update visible to the Requester..."
-              />
-              <div className="d-flex justify-content-end">
-                <button type="submit" className="btn btn-zen-primary btn-sm px-3" disabled={isPostingComment || !newComment.trim()}>
-                  {isPostingComment ? 'Posting...' : 'Post Comment'}
-                </button>
-              </div>
-            </form>
-          </div>
+          {/* Public Comments panel — identical to the Requester's, editable
+              by staff too. Shared with TicketDetail.tsx (review of PR #68,
+              item 5) — this used to be a copy-pasted, already-drifted
+              duplicate of the same panel. */}
+          <PublicCommentsPanel
+            ticketId={ticketId}
+            comments={comments}
+            onCommentPosted={(created) => setComments((prev) => [...prev, created])}
+            placeholder="Share an update visible to the Requester..."
+          />
 
           {/* Internal Notes panel — visually distinct (BR-24, ui-spec.md
               §7): a Requester never reaches this panel at all, but the

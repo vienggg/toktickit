@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch, parseApiError } from '../api';
-import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, formatDate } from '../hooks/usePaginatedFetch';
+import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, useStaffMembers, formatDate } from '../hooks/usePaginatedFetch';
 
 export interface StaffQueueTicket {
   id: number;
@@ -27,11 +27,6 @@ interface PaginationMeta {
   pageSize: number;
   total: number;
   totalPages: number;
-}
-
-interface StaffMember {
-  id: number;
-  name: string;
 }
 
 const DEFAULT_PAGINATION: PaginationMeta = { page: 1, pageSize: 10, total: 0, totalPages: 1 };
@@ -81,11 +76,18 @@ function OwnerPill({ name }: { name: string | null }) {
 }
 
 // The read-only TicketDetailModal built as I-6's stopgap ("Open" action)
-// was removed here once I-7 (Issue #56) shipped the real, editable Staff
-// Ticket Detail screen at /staff/tickets/:id — see handleOpen below. The
-// modal is no longer reachable from this screen's default behavior; a
-// caller that still wants a custom, non-navigating "Open" action can pass
-// onOpenTicket and render its own UI from the ticket id it receives.
+// was fully deleted once I-7 (Issue #56) shipped the real, editable Staff
+// Ticket Detail screen at /staff/tickets/:id — see handleOpen below.
+// `TicketDetailModal` no longer exists anywhere in this codebase. What
+// remains is `onOpenTicket`: a bare optional callback prop that receives
+// the clicked ticket's id and does nothing else — it is not "the modal
+// made optional." A caller that passes it is opting out of navigation
+// entirely and is responsible for building its own UI in response; this
+// component renders no modal of any kind on that path. (Corrected in
+// review of PR #68 — item 3: the previous wording here, and the matching
+// claims in docs/lab-03/tests.md UI-03e and this file's own test suite,
+// inaccurately described the callback as the old modal "remaining
+// available.")
 
 interface QueuePage {
   tickets: StaffQueueTicket[];
@@ -97,21 +99,10 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   const navigate = useNavigate();
 
   const categories = useCategoryOptions();
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-
-  React.useEffect(() => {
-    const controller = new AbortController();
-    async function loadStaffMembers() {
-      try {
-        const res = await apiFetch('/api/staff/members', { signal: controller.signal });
-        if (res.ok) setStaffMembers(await res.json());
-      } catch {
-        // Non-fatal — the Owner picker simply stays limited to All/Unassigned.
-      }
-    }
-    loadStaffMembers();
-    return () => controller.abort();
-  }, []);
+  // Item 7 fix (review of PR #68): shared with StaffTicketDetail.tsx via
+  // useStaffMembers instead of each screen independently fetching
+  // GET /api/staff/members.
+  const staffMembers = useStaffMembers();
 
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -191,11 +182,11 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   };
 
   // I-7 (Issue #56) now provides the real, editable Staff Ticket Detail
-  // screen at /staff/tickets/:id, so "Open" navigates there by default
-  // instead of the read-only modal that was I-6's stopgap (kept above,
-  // still available, but no longer the default action). `onOpenTicket`
-  // remains available as an optional override for a caller that wants
-  // custom behavior instead of navigation.
+  // screen at /staff/tickets/:id, so "Open" navigates there by default.
+  // The read-only modal that was I-6's stopgap has been deleted, not kept
+  // around as a fallback. `onOpenTicket` is an optional override callback
+  // for a caller that wants to handle "Open" itself instead of navigating
+  // — it renders no UI of its own.
   const handleOpen = (ticket: StaffQueueTicket) => {
     if (onOpenTicket) onOpenTicket(ticket.id);
     else navigate(`/staff/tickets/${ticket.id}`);

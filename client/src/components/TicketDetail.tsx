@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiFetch, parseApiError } from '../api';
+import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
 
 interface Attachment {
   id: number;
@@ -38,22 +39,6 @@ interface TicketDetailData {
   createdAt: string;
   updatedAt: string;
 }
-
-interface PublicCommentData {
-  id: number;
-  ticketId: number;
-  authorId: number;
-  authorName: string;
-  authorRole: string;
-  body: string;
-  createdAt: string;
-}
-
-const ROLE_LABEL: Record<string, string> = {
-  REQUESTER: 'Requester',
-  IT_STAFF: 'IT Staff',
-  ADMINISTRATOR: 'Administrator',
-};
 
 interface CategoryOption {
   id: number;
@@ -96,9 +81,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
 
   // Public Comments state
   const [comments, setComments] = useState<PublicCommentData[]>([]);
-  const [newComment, setNewComment] = useState<string>('');
-  const [isPostingComment, setIsPostingComment] = useState<boolean>(false);
-  const [commentError, setCommentError] = useState<string | null>(null);
+  const [commentsLoadError, setCommentsLoadError] = useState<string | null>(null);
 
   // "Problem Appears Resolved" state
   const [isSignalingResolution, setIsSignalingResolution] = useState<boolean>(false);
@@ -111,13 +94,13 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
         // Fixed in review: this previously did nothing on a non-ok
         // response, leaving a stale/empty list with no indication
         // anything had failed — unlike fetchTicketDetail's own handling.
-        setCommentError(await parseApiError(res, `Failed to load comments (HTTP ${res.status})`));
+        setCommentsLoadError(await parseApiError(res, `Failed to load comments (HTTP ${res.status})`));
         return;
       }
       setComments(await res.json());
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'AbortError') {
-        setCommentError('Failed to load comments. Please try again.');
+        setCommentsLoadError('Failed to load comments. Please try again.');
       }
     }
   }, [ticketId]);
@@ -173,41 +156,6 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     loadRef();
     return () => controller.abort();
   }, [fetchTicketDetail, fetchComments]);
-
-  const handlePostComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCommentError(null);
-    const trimmed = newComment.trim();
-    if (!trimmed) {
-      setCommentError('Comment cannot be empty.');
-      return;
-    }
-    if (trimmed.length > 2000) {
-      setCommentError('Comment cannot exceed 2000 characters.');
-      return;
-    }
-
-    setIsPostingComment(true);
-    try {
-      const res = await apiFetch(`/api/tickets/${ticketId}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: trimmed }),
-      });
-      if (!res.ok) {
-        throw new Error(await parseApiError(res, 'Failed to post comment'));
-      }
-      // Fixed in review: append the comment the POST response already
-      // returned instead of re-fetching the whole thread for one row.
-      const created: PublicCommentData = await res.json();
-      setComments((prev) => [...prev, created]);
-      setNewComment('');
-    } catch (err) {
-      setCommentError(err instanceof Error ? err.message : 'Failed to post comment');
-    } finally {
-      setIsPostingComment(false);
-    }
-  };
 
   const handleSignalResolution = async () => {
     setResolutionSignalError(null);
@@ -777,66 +725,15 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
           {/* PUBLIC COMMENTS (I-5) — visible to Requester, IT Staff, and
               Administrator (BR-04); background matches the page canvas
               per ui-spec.md §1, distinguishing it from the Internal Notes
-              panel IT Staff will see in I-7. */}
-          <div className="mt-4 pt-4 border-top">
-            <h6 className="fw-bold text-dark mb-3">💬 Public Comments</h6>
-
-            {comments.length === 0 && (
-              <p className="text-muted small mb-3">No comments yet on this ticket.</p>
-            )}
-
-            {comments.length > 0 && (
-              <div className="d-flex flex-column gap-2 mb-3">
-                {comments.map((c) => (
-                  <div
-                    key={c.id}
-                    className="p-3 rounded border"
-                    style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)' }}
-                  >
-                    <div className="d-flex justify-content-between align-items-center mb-1">
-                      <span className="fw-semibold text-dark small d-flex align-items-center gap-2">
-                        {c.authorName}
-                        {c.authorRole !== 'REQUESTER' && (
-                          <span className="badge bg-secondary" style={{ fontSize: '0.65rem' }}>
-                            {ROLE_LABEL[c.authorRole] ?? c.authorRole}
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-muted small">{formatDate(c.createdAt)}</span>
-                    </div>
-                    <div className="text-dark" style={{ whiteSpace: 'pre-wrap' }}>{c.body}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {commentError && <div className="alert alert-danger small py-2 mb-3">{commentError}</div>}
-
-            <form onSubmit={handlePostComment}>
-              <label htmlFor="new-comment" className="form-label small fw-semibold text-dark">
-                Add a comment
-              </label>
-              <textarea
-                id="new-comment"
-                className="form-control mb-2"
-                rows={2}
-                maxLength={2000}
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                disabled={isPostingComment}
-                placeholder="Share an update or ask a question..."
-              />
-              <div className="d-flex justify-content-end">
-                <button
-                  type="submit"
-                  className="btn btn-zen-primary btn-sm px-3"
-                  disabled={isPostingComment || !newComment.trim()}
-                >
-                  {isPostingComment ? 'Posting...' : 'Post Comment'}
-                </button>
-              </div>
-            </form>
-          </div>
+              panel IT Staff sees in I-7. Shared with StaffTicketDetail.tsx
+              (review of PR #68, item 5) — this was previously a verbatim
+              copy-paste of the same panel with its own drifted behavior. */}
+          {commentsLoadError && <div className="alert alert-danger small py-2 mt-4">{commentsLoadError}</div>}
+          <PublicCommentsPanel
+            ticketId={ticketId}
+            comments={comments}
+            onCommentPosted={(created) => setComments((prev) => [...prev, created])}
+          />
 
           {/* PROBLEM APPEARS RESOLVED (I-5, BR-05) — a Requester may
               indicate resolution but cannot formally close the ticket;

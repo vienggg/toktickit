@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+
 import { apiFetch, parseApiError } from '../api';
 
 // Extracted in review of PR #67 (item 4): MyTickets.tsx and
@@ -89,4 +90,62 @@ export function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+export interface StaffMember {
+  id: number;
+  name: string;
+}
+
+// Extracted in review of PR #68 (item 7): StaffTicketQueue.tsx and
+// StaffTicketDetail.tsx each independently fetched GET /api/staff/members
+// with no shared cache — the same per-screen-fetch pattern useCategoryOptions
+// above already fixed once for categories. Non-fatal on failure, matching
+// useCategoryOptions: the caller's picker simply stays limited.
+export function useStaffMembers(): StaffMember[] {
+  const [members, setMembers] = useState<StaffMember[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadStaffMembers() {
+      try {
+        const res = await apiFetch('/api/staff/members', { signal: controller.signal });
+        if (res.ok) setMembers(await res.json());
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error('Failed to load staff members:', err);
+        }
+      }
+    }
+    loadStaffMembers();
+    return () => controller.abort();
+  }, []);
+  return members;
+}
+
+// Extracted in review of PR #68 (item 9): submitOwner/handleSavePriority/
+// handleApplyStatus in StaffTicketDetail.tsx each triplicated the same
+// ~25-line "clear messages, set saving flag, call the API, parse errors,
+// show a timed success message" boilerplate. This is the shared core;
+// each call site still owns its own request payload and endpoint.
+export function useSavingAction() {
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const run = useCallback(async (action: () => Promise<void>, successMessage: string, errorFallback: string) => {
+    setError(null);
+    setSuccess(null);
+    setIsSaving(true);
+    try {
+      await action();
+      setSuccess(successMessage);
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : errorFallback);
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  return { isSaving, error, success, run, setError } as const;
 }

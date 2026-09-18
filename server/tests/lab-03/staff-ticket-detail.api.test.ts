@@ -78,7 +78,11 @@ describe("IT Staff Ticket Detail (API-15, API-16, API-17)", () => {
       expect(res.body.id).toBe(ticket.id);
       expect(res.body.itPriority).toBeDefined();
       expect(res.body.status).toBe("NEW");
-      expect(res.body.permittedStatusTransitions).toEqual(expect.arrayContaining(["OPEN", "IN_PROGRESS", "CANCELLED"]));
+      // Ticket is unassigned, so IN_PROGRESS is BR-17-filtered out here —
+      // see the dedicated BR-17 tests below for both the filtered and
+      // owned cases.
+      expect(res.body.permittedStatusTransitions).toEqual(expect.arrayContaining(["OPEN", "CANCELLED"]));
+      expect(res.body.permittedStatusTransitions).not.toContain("IN_PROGRESS");
       expect(res.body.requester).toBeDefined();
     });
 
@@ -88,6 +92,27 @@ describe("IT Staff Ticket Detail (API-15, API-16, API-17)", () => {
       expect(res.status).toBe(200);
       expect(res.body.requester.passwordHash).toBeUndefined();
       expect(JSON.stringify(res.body)).not.toMatch(/passwordHash/i);
+    });
+
+    // Added in review of PR #68 (item 1): GET's permittedStatusTransitions
+    // previously did not apply the BR-17 filter that PATCH /status
+    // enforces, so an unassigned ticket's response could offer IN_PROGRESS
+    // as a permitted destination even though applying it would always 409.
+    it("excludes IN_PROGRESS from permittedStatusTransitions while the ticket is unassigned (BR-17)", async () => {
+      const ticket = await createFreshTicket("NEW");
+      const res = await staffAgent.get(`/api/staff/tickets/${ticket.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.ownerId).toBeNull();
+      expect(res.body.permittedStatusTransitions).not.toContain("IN_PROGRESS");
+      expect(res.body.permittedStatusTransitions).toEqual(expect.arrayContaining(["OPEN", "CANCELLED"]));
+    });
+
+    it("includes IN_PROGRESS in permittedStatusTransitions once the ticket has an owner", async () => {
+      const ticket = await createFreshTicket("NEW");
+      await staffAgent.patch(`/api/staff/tickets/${ticket.id}/owner`).send({ ownerId: staffUserId });
+      const res = await staffAgent.get(`/api/staff/tickets/${ticket.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.permittedStatusTransitions).toContain("IN_PROGRESS");
     });
 
     it("403 for Requester", async () => {

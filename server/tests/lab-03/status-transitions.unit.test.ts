@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { TicketStatus } from "@prisma/client";
-import { STATUS_TRANSITIONS, getPermittedTransitions, isLegalTransition } from "../../src/utils/statusTransitions.js";
+import {
+  STATUS_TRANSITIONS,
+  getPermittedTransitions,
+  getPermittedTransitionsForTicket,
+  isLegalTransition,
+} from "../../src/utils/statusTransitions.js";
 
 // UNIT-03/UNIT-04 (docs/lab-03/tests.md): exercises the §6.5 Status
 // Transition Matrix helper directly, without spinning up the Express app.
@@ -62,5 +67,27 @@ describe("Status Transition Matrix (UNIT-03, UNIT-04 — BR-19, specification.md
     for (const status of ALL_STATUSES) {
       expect(STATUS_TRANSITIONS[status]).toBeDefined();
     }
+  });
+
+  // Added in review of PR #68 (item 1): PATCH /status applied a BR-17
+  // filter (no IN_PROGRESS while unassigned) that GET's
+  // permittedStatusTransitions did not, so the two could disagree about
+  // what's legal for the same ticket. getPermittedTransitionsForTicket is
+  // the single helper both call sites now share.
+  describe("getPermittedTransitionsForTicket (BR-17)", () => {
+    it("excludes IN_PROGRESS for an unassigned ticket even when otherwise legal", () => {
+      expect(getPermittedTransitionsForTicket(TicketStatus.NEW, null)).not.toContain(TicketStatus.IN_PROGRESS);
+      expect(getPermittedTransitionsForTicket(TicketStatus.NEW, null)).toEqual(
+        expect.arrayContaining([TicketStatus.OPEN, TicketStatus.CANCELLED])
+      );
+    });
+
+    it("includes IN_PROGRESS once the ticket has an owner", () => {
+      expect(getPermittedTransitionsForTicket(TicketStatus.NEW, 42)).toContain(TicketStatus.IN_PROGRESS);
+    });
+
+    it("does not otherwise alter the permitted set from statuses where IN_PROGRESS isn't a candidate", () => {
+      expect(getPermittedTransitionsForTicket(TicketStatus.RESOLVED, null)).toEqual(getPermittedTransitions(TicketStatus.RESOLVED));
+    });
   });
 });

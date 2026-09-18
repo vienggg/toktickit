@@ -191,7 +191,7 @@ describe('IT Staff Ticket Queue (UI-03, UI-04, UI-05)', () => {
     await waitFor(() => expect(screen.getByTestId('detail-route-stub')).toBeInTheDocument());
   });
 
-  it('the read-only modal remains available via the onOpenTicket override escape hatch, but is not the default action', async () => {
+  it('onOpenTicket, when passed, fires with the clicked ticket id instead of navigating (it is a bare callback, not a preserved modal)', async () => {
     const onOpenTicket = vi.fn();
     render(
       <MemoryRouter initialEntries={['/staff/queue']}>

@@ -11,7 +11,7 @@
      Public Comments panel on the Staff Ticket Detail screen — a Requester
      never sees this panel at all (BR-24), but the color itself still needs
      to read as clearly "different from public" for IT Staff/Administrator. */
-  --color-internal-note-bg: #FFF4E5;
+  --color-internal-note-bg: #FDF4E7;
 }
 
 body {

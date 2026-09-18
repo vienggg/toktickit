@@ -9,7 +9,7 @@ import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
 import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
-import { getPermittedTransitions, isLegalTransition } from "./utils/statusTransitions.js";
+import { getPermittedTransitions, getPermittedTransitionsForTicket, isLegalTransition } from "./utils/statusTransitions.js";
 import {
   requireAuth,
   requirePasswordChanged,
@@ -74,6 +74,12 @@ const RESOLUTION_SIGNAL_BLOCKED_STATUSES: TicketStatus[] = [
 // than left for I-8. Fixed by selecting only the fields any response
 // actually renders, everywhere a ticket's requester is included.
 const SAFE_REQUESTER_SELECT = { id: true, name: true, email: true, department: true } as const;
+
+// Item 10 in review of PR #68: the `{ id, name }` owner projection was
+// repeated ad hoc in three places (staff queue, staff detail, and the
+// staff-detail update handlers) instead of being named like
+// SAFE_REQUESTER_SELECT above for the analogous requester projection.
+const STAFF_OWNER_SELECT = { id: true, name: true } as const;
 
 // The Prisma field is `requestedPriority` (Lab 3), but the Lab 2 client and
 // its existing tests still read `priority` (Title-Case) and `status`
@@ -1265,7 +1271,7 @@ app.get(
         take: pageSizeNum,
         include: {
           category: { select: { id: true, name: true } },
-          owner: { select: { id: true, name: true } },
+          owner: { select: STAFF_OWNER_SELECT },
           requester: { select: { id: true, name: true } },
         },
       });
@@ -1305,7 +1311,7 @@ app.get(
       const members = await getPrisma().user.findMany({
         where: { role: { in: [Role.IT_STAFF, Role.ADMINISTRATOR] }, isActive: true },
         orderBy: { name: "asc" },
-        select: { id: true, name: true },
+        select: STAFF_OWNER_SELECT,
       });
       return res.status(200).json(members);
     } catch (err) {
@@ -1329,19 +1335,25 @@ app.get(
 // { error: { code: "NOT_FOUND", ... } } shape as every other Ticket-scoped
 // route in this file, and so a future change to that response shape only
 // has one place to change.
+// Shared with the three PATCH handlers below (item 4 in review of PR #68):
+// this is the exact `include` shape `ticket.update()` is given directly so
+// the write and the read happen in one query, instead of a second
+// `findStaffTicketOr404` call after every write.
+const STAFF_TICKET_DETAIL_INCLUDE = {
+  category: true,
+  relatedSystem: true,
+  requester: { select: SAFE_REQUESTER_SELECT },
+  owner: { select: STAFF_OWNER_SELECT },
+  attachments: { where: { isRemoved: false }, orderBy: { id: "asc" as const } },
+} satisfies Prisma.TicketInclude;
+
 async function findStaffTicketOr404(res: Response, id: number) {
   return fetchAuthorizedTicketOr404(
     res,
     () =>
       getPrisma().ticket.findUnique({
         where: { id },
-        include: {
-          category: true,
-          relatedSystem: true,
-          requester: { select: SAFE_REQUESTER_SELECT },
-          owner: { select: { id: true, name: true } },
-          attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
-        },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
       }),
     () => true
   );
@@ -1367,7 +1379,7 @@ function serializeStaffTicketDetail(ticket: StaffTicket) {
     // independent copy of the transition matrix, per the same
     // "server computes, client reads" fix PR #66 applied to
     // canSignalResolution above.
-    permittedStatusTransitions: getPermittedTransitions(ticket.status),
+    permittedStatusTransitions: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId),
     ownerId: ticket.ownerId,
     owner: ticket.owner,
     requesterId: ticket.requesterId,
@@ -1433,9 +1445,17 @@ app.patch(
         }
       }
 
-      await getPrisma().ticket.update({ where: { id: ticket.id }, data: { ownerId } });
-      const updated = await findStaffTicketOr404(res, ticket.id);
-      if (!updated) return;
+      // Item 4 in review of PR #68: pass STAFF_TICKET_DETAIL_INCLUDE
+      // directly to update() instead of a second findStaffTicketOr404
+      // call — one query instead of two, and no theoretical 404-on-a-
+      // successful-write race (an update() on an id just confirmed to
+      // exist can't itself return "not found" the way a second fetch
+      // could in principle race on).
+      const updated = await getPrisma().ticket.update({
+        where: { id: ticket.id },
+        data: { ownerId },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      });
 
       return res.status(200).json(serializeStaffTicketDetail(updated));
     } catch (err) {
@@ -1466,9 +1486,11 @@ app.patch(
         return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'itPriority' must be a valid Priority value." } });
       }
 
-      await getPrisma().ticket.update({ where: { id: ticket.id }, data: { itPriority: itPriority as Priority } });
-      const updated = await findStaffTicketOr404(res, ticket.id);
-      if (!updated) return;
+      const updated = await getPrisma().ticket.update({
+        where: { id: ticket.id },
+        data: { itPriority: itPriority as Priority },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      });
 
       return res.status(200).json(serializeStaffTicketDetail(updated));
     } catch (err) {
@@ -1509,20 +1531,25 @@ app.patch(
 
       // BR-17: a Ticket cannot enter IN_PROGRESS while unassigned, even
       // though IN_PROGRESS may otherwise be a legal destination from the
-      // current status.
+      // current status. Shared with GET's permittedStatusTransitions via
+      // getPermittedTransitionsForTicket (statusTransitions.ts) — fixed in
+      // review of PR #68 (item 1): this filter used to be duplicated here
+      // independently of GET's unfiltered getPermittedTransitions call.
       if (targetStatus === TicketStatus.IN_PROGRESS && ticket.ownerId === null) {
         return res.status(409).json({
           error: {
             code: "ILLEGAL_TRANSITION",
             message: "A ticket cannot enter IN_PROGRESS while unassigned.",
-            permitted: getPermittedTransitions(ticket.status).filter((s) => s !== TicketStatus.IN_PROGRESS),
+            permitted: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId),
           },
         });
       }
 
-      await getPrisma().ticket.update({ where: { id: ticket.id }, data: { status: targetStatus } });
-      const updated = await findStaffTicketOr404(res, ticket.id);
-      if (!updated) return;
+      const updated = await getPrisma().ticket.update({
+        where: { id: ticket.id },
+        data: { status: targetStatus },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      });
 
       return res.status(200).json(serializeStaffTicketDetail(updated));
     } catch (err) {

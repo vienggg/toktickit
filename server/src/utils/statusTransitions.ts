@@ -45,3 +45,22 @@ export function getPermittedTransitions(from: TicketStatus): TicketStatus[] {
 export function isLegalTransition(from: TicketStatus, to: TicketStatus): boolean {
   return STATUS_TRANSITIONS[from].includes(to);
 }
+
+// BR-17: a Ticket cannot enter IN_PROGRESS while unassigned, even though
+// IN_PROGRESS may otherwise be a legal destination per the §6.5 matrix
+// above. This is layered on top of (not folded into) STATUS_TRANSITIONS
+// itself, since BR-17 depends on ownership — a fact about a specific
+// Ticket, not a property of the status graph. Fixed in review of PR #68
+// (item 1): PATCH /api/staff/tickets/:id/status applied this filter but
+// GET /api/staff/tickets/:id's permittedStatusTransitions did not, so the
+// client's Status dropdown could offer IN_PROGRESS for an unassigned
+// ticket and then always get a 409 back from PATCH for that exact choice.
+// Both call sites now share this one helper instead of each re-deriving
+// "permitted transitions minus BR-17's IN_PROGRESS carve-out" independently.
+export function getPermittedTransitionsForTicket(status: TicketStatus, ownerId: number | null): TicketStatus[] {
+  const permitted = getPermittedTransitions(status);
+  if (ownerId === null) {
+    return permitted.filter((s) => s !== TicketStatus.IN_PROGRESS);
+  }
+  return permitted;
+}
