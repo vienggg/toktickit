@@ -36,8 +36,16 @@ export type ScreenshotFolder =
 export async function login(page: Page, email: string, password: string) {
   await page.goto("/login");
   await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/password/i).fill(password);
+  // getByLabel(/password/i) alone also matches the "Show password" toggle
+  // button (its aria-label contains "password"); the textbox role narrows
+  // it to the actual <input>.
+  await page.getByRole("textbox", { name: /password/i }).fill(password);
   await page.getByRole("button", { name: /log in|sign in/i }).click();
+  // The click triggers an async POST /api/auth/login followed by a client-
+  // side redirect; without waiting for that redirect, an immediate
+  // page.goto() elsewhere in a spec can race ahead of it and land back on
+  // /login. Wait for the URL to actually leave /login before returning.
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15_000 });
 }
 
 /**

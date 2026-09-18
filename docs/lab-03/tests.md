@@ -99,10 +99,17 @@ Security/Authorization · Migration/Regression · End-to-End.
 
 | Test ID | Type | Requirement/AC | What It Tests | Expected Result | Automated Test File | Final |
 |---|---|---|---|---|---|---|
-| E2E-01 | E2E | AC-01, AC-07, AC-15 | Login → app → logout → blocked | Full session lifecycle; direct navigation to a protected route after logout redirects to `/login` | `e2e/lab-03/authentication.spec.ts` | |
-| E2E-02 | E2E | AC-02 | Initial password login and change | Normal app opens only after a valid password change | `e2e/lab-03/authentication.spec.ts` | |
-| E2E-03 | E2E | FR-14–FR-19 | Full staff workflow | Queue → open Ticket → claim → set IT Priority → change status → post comment → post note | `e2e/lab-03/staff-ticket-flow.spec.ts` | |
-| E2E-04 | E2E | FR-20–FR-23 | Full admin workflow | Create user → set initial password → that user's forced change at next login | `e2e/lab-03/user-administration.spec.ts` | |
+| E2E-01 | E2E | AC-01, AC-07, AC-15 | Login → app → logout → blocked | Full session lifecycle; direct navigation to a protected route after logout redirects to `/login` | `e2e/lab-03/authentication.spec.ts` | Pass |
+| E2E-02 | E2E | AC-02 | Initial password login and change | Normal app opens only after a valid password change | `e2e/lab-03/authentication.spec.ts` | Pass |
+| E2E-03 | E2E | FR-14–FR-19 | Full staff workflow | Queue → open Ticket → claim → set IT Priority → change status → post comment → post note | `e2e/lab-03/staff-ticket-flow.spec.ts` | Pass |
+| E2E-04 | E2E | FR-20–FR-23 | Full admin workflow | Create user → set initial password → that user's forced change at next login | `e2e/lab-03/user-administration.spec.ts` | Pass |
+
+`e2e/lab-03/visual-inspection.spec.ts` additionally backs the §10 Visual
+Inspection Checklist items in `ui-spec.md` with programmatic Playwright
+assertions (horizontal-overflow, badge-color, panel-background-contrast,
+editable-vs-read-only, forbidden-state, and no-clipping checks) rather than
+duplicating an E2E ID — it is supporting evidence for the checklist, not a
+new end-to-end scenario.
 
 ---
 
@@ -130,9 +137,26 @@ and a re-run of the same request confirming it.
 
 ## Screenshot / Visual Evidence Traceability
 
-Captured via `e2e/lab-03/capture.ts` (see `sprint-plan.md` §3), one run per
-merged feature Issue, re-run in full during I-9. Folders exactly as required:
-`artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`.
+Captured via `e2e/lab-03/capture.ts` (see `sprint-plan.md` §3). Folders exactly
+as required: `artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`,
+no 5th folder. Full manifest as of the I-9 run (`npx playwright test
+e2e/lab-03/`, 13/13 passing):
+
+```
+artifacts/lab-03/screenshots/authentication/Figure-after-logout@desktop.png
+artifacts/lab-03/screenshots/authentication/Figure-change-password-success@desktop.png
+artifacts/lab-03/screenshots/authentication/Figure-forced-change-password-screen@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/authentication/Figure-login-form@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/authentication/Figure-login-success@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/staff-queue/Figure-queue-filtered-search@desktop.png
+artifacts/lab-03/screenshots/staff-queue/Figure-queue-overview@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/staff-ticket-detail/Figure-ticket-detail-after-actions@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/staff-ticket-detail/Figure-ticket-detail-unclaimed@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/user-management/Figure-create-user-modal@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/user-management/Figure-edit-user-modal@{desktop,tablet,mobile}.png
+artifacts/lab-03/screenshots/user-management/Figure-user-list@{desktop,tablet,mobile}.png
+```
+
 Each figure referenced in the submitted PDF corresponds to a specific AC or FR
 from `specification.md`; the mapping is finalized in I-11 alongside the final
 `reviewer.md`.
