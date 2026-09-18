@@ -1649,6 +1649,294 @@ app.post(
   }
 );
 
+// ---------------------------------------------------------------------------
+// Lab 3 (I-8) — Administrator User Management
+// ---------------------------------------------------------------------------
+
+// Every response below returns only these fields — never passwordHash.
+// Selected explicitly (not `include`) everywhere this file touches a User
+// row for these routes, per SEC-01's fix above: `select` has no `true`
+// shorthand that could accidentally widen to the full row the way an
+// `include` on a relation would.
+const SAFE_ADMIN_USER_SELECT = { id: true, name: true, email: true, role: true, isActive: true } as const;
+
+const VALID_ROLES = Object.values(Role) as string[];
+
+app.get(
+  "/api/admin/users",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { search, role } = req.query;
+
+      const where: Prisma.UserWhereInput = {};
+
+      if (role !== undefined && role !== "All") {
+        if (typeof role !== "string" || !VALID_ROLES.includes(role)) {
+          return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}, or 'All'.`));
+        }
+        where.role = role as Role;
+      }
+
+      if (search !== undefined) {
+        if (typeof search !== "string") {
+          return res.status(400).json(validationError("search", "must be a string."));
+        }
+        const query = search.trim();
+        if (query.length > 0) {
+          where.OR = [
+            { name: { contains: query, mode: "insensitive" } },
+            { email: { contains: query, mode: "insensitive" } },
+          ];
+        }
+      }
+
+      const users = await getPrisma().user.findMany({
+        where,
+        orderBy: { name: "asc" },
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(200).json(users);
+    } catch (err) {
+      console.error("Admin user list error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch users." } });
+    }
+  }
+);
+
+function validateEmailFormat(email: unknown): string | null {
+  if (typeof email !== "string") return null;
+  const trimmed = email.trim();
+  // Simple, permissive email shape check — this codebase has no existing
+  // email-format validator to reuse, and full RFC validation is out of scope.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+app.post(
+  "/api/admin/users",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { name, email, role, isActive, initialPassword } = req.body ?? {};
+
+      if (typeof name !== "string" || name.trim().length === 0) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'name' is required." } });
+      }
+
+      const normalizedEmail = validateEmailFormat(email);
+      if (!normalizedEmail) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'email' must be a valid email address." } });
+      }
+
+      // FR-24, BR-25: role must be a valid Role enum value.
+      if (typeof role !== "string" || !VALID_ROLES.includes(role)) {
+        return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}.`));
+      }
+
+      if (typeof isActive !== "boolean") {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'isActive' must be a boolean." } });
+      }
+
+      if (typeof initialPassword !== "string" || !meetsPasswordPolicy(initialPassword)) {
+        return res.status(400).json({
+          error: { code: "WEAK_PASSWORD", message: "Initial password must be at least 8 characters and include a letter and a digit." },
+        });
+      }
+
+      // BR-26: email uniqueness is case-insensitive.
+      const existing = await getPrisma().user.findFirst({
+        where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (existing) {
+        return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+      }
+
+      // New users are always created with mustChangePassword: true — the
+      // initial password is temporary by design (FR-21).
+      const created = await getPrisma().user.create({
+        data: {
+          name: name.trim(),
+          email: normalizedEmail,
+          department: "Unassigned",
+          role: role as Role,
+          isActive,
+          passwordHash: hashPassword(initialPassword),
+          mustChangePassword: true,
+        },
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(201).json(created);
+    } catch (err) {
+      console.error("Create user error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to create user." } });
+    }
+  }
+);
+
+app.patch(
+  "/api/admin/users/:id",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid user ID." } });
+      }
+
+      const target = await getPrisma().user.findUnique({
+        where: { id },
+        select: { id: true, email: true, role: true, isActive: true },
+      });
+      if (!target) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "User not found." } });
+      }
+
+      const { name, email, role, isActive } = req.body ?? {};
+      const data: Prisma.UserUpdateInput = {};
+
+      if (name !== undefined) {
+        if (typeof name !== "string" || name.trim().length === 0) {
+          return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'name' must be a non-empty string." } });
+        }
+        data.name = name.trim();
+      }
+
+      let normalizedEmail: string | undefined;
+      if (email !== undefined) {
+        const parsed = validateEmailFormat(email);
+        if (!parsed) {
+          return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'email' must be a valid email address." } });
+        }
+        normalizedEmail = parsed;
+        // BR-26: uniqueness excludes the target user's own current row.
+        const duplicate = await getPrisma().user.findFirst({
+          where: { email: { equals: normalizedEmail, mode: "insensitive" }, NOT: { id } },
+          select: { id: true },
+        });
+        if (duplicate) {
+          return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+        }
+        data.email = normalizedEmail;
+      }
+
+      if (role !== undefined) {
+        if (typeof role !== "string" || !VALID_ROLES.includes(role)) {
+          return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}.`));
+        }
+        data.role = role as Role;
+      }
+
+      if (isActive !== undefined) {
+        if (typeof isActive !== "boolean") {
+          return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'isActive' must be a boolean." } });
+        }
+        data.isActive = isActive;
+      }
+
+      // BR-27: an Administrator cannot deactivate or demote their own
+      // account. Compared against the ACTING user (req.authUser!.id), not
+      // the target — an Administrator may still deactivate/demote a
+      // *different* Administrator freely (subject to BR-28 below).
+      const actingUserId = req.authUser!.id;
+      const isActingOnSelf = actingUserId === target.id;
+      const wouldDeactivateSelf = isActingOnSelf && isActive === false;
+      const wouldDemoteSelf = isActingOnSelf && role !== undefined && role !== Role.ADMINISTRATOR && target.role === Role.ADMINISTRATOR;
+      if (wouldDeactivateSelf || wouldDemoteSelf) {
+        return res.status(403).json({
+          error: { code: "SELF_MODIFICATION_BLOCKED", message: "You cannot deactivate or change the role of your own account." },
+        });
+      }
+
+      // BR-28: reject any update that would leave zero active
+      // Administrators system-wide. Only relevant when the TARGET user is
+      // currently an active Administrator and the update would make them
+      // inactive or non-Administrator. The count of "other" active
+      // Administrators is taken fresh from the database, excluding the
+      // target row itself, so it reflects the true state at write time
+      // rather than a stale in-memory count computed before this request.
+      const targetIsCurrentlyActiveAdmin = target.role === Role.ADMINISTRATOR && target.isActive;
+      const targetWouldStopBeingActiveAdmin =
+        targetIsCurrentlyActiveAdmin &&
+        ((isActive === false) || (role !== undefined && role !== Role.ADMINISTRATOR));
+      if (targetWouldStopBeingActiveAdmin) {
+        const otherActiveAdminCount = await getPrisma().user.count({
+          where: { role: Role.ADMINISTRATOR, isActive: true, NOT: { id: target.id } },
+        });
+        if (otherActiveAdminCount === 0) {
+          return res.status(403).json({
+            error: {
+              code: "LAST_ADMINISTRATOR",
+              message: "This action would leave zero active Administrator accounts and is not permitted.",
+            },
+          });
+        }
+      }
+
+      const updated = await getPrisma().user.update({
+        where: { id },
+        data,
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(200).json(updated);
+    } catch (err) {
+      console.error("Update user error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update user." } });
+    }
+  }
+);
+
+// FR-23: sets a new initial password and forces mustChangePassword. No
+// self-service/last-Administrator restriction applies here (api-spec.md
+// §5) — an Administrator may reset their own or anyone else's password.
+app.post(
+  "/api/admin/users/:id/initial-password",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid user ID." } });
+      }
+
+      const target = await getPrisma().user.findUnique({ where: { id }, select: { id: true } });
+      if (!target) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "User not found." } });
+      }
+
+      const { initialPassword } = req.body ?? {};
+      if (typeof initialPassword !== "string" || !meetsPasswordPolicy(initialPassword)) {
+        return res.status(400).json({
+          error: { code: "WEAK_PASSWORD", message: "Initial password must be at least 8 characters and include a letter and a digit." },
+        });
+      }
+
+      const updated = await getPrisma().user.update({
+        where: { id },
+        data: { passwordHash: hashPassword(initialPassword), mustChangePassword: true },
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(200).json(updated);
+    } catch (err) {
+      console.error("Set initial password error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to set initial password." } });
+    }
+  }
+);
+
 // Global Error Handler for Multer upload errors
 app.use(
   (

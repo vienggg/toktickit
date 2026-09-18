@@ -65,13 +65,13 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-19 | API | BR-04, BR-21, BR-22, BR-23, BR-32 | Public Comments CRUD (create/list only) | Append-only (no PATCH/DELETE route); author/timestamp server-set; rejects blank/oversize content; 404 for non-owning Requester; 401 unauthenticated | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-20 | API | BR-04, BR-21 | Internal Notes CRUD (create/list only) | Staff/Admin only; append-only; same validation as comments | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | SEC-01 | Security | (found capturing I-7's Part 7 curl evidence, not from a written requirement — every `include: { requester: true }` fetched the full `User` row, including `passwordHash`, into the ticket response; three Requester-facing routes since I-2, plus the new I-7 staff-detail route) | No ticket response ever includes `passwordHash` | `res.body.requester.passwordHash` is `undefined` and the raw JSON contains no `passwordHash` string, for both the Requester's own ticket detail and the staff detail route | `server/tests/lab-02/ticket-detail.api.test.ts`, `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
-| API-21 | API | FR-20 | Admin user list — search/role filter | Correct filtering; non-Admin → 403 | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-22 | API | AC-11, BR-26 | Create user — duplicate email | 409, case-insensitive match, no user created | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-23 | API | FR-24 | Create user — invalid role | 400 | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-24 | API | FR-22 | Edit user — basic fields | Name/email/role/isActive update correctly | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-25 | API | AC-14, FR-23 | Set new initial password | mustChangePassword forced true; that user's next login requires change | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-26 | API | AC-12, BR-27 | Self-deactivation blocked | Admin cannot deactivate/demote own account | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-27 | API | AC-13, BR-28 | Last-Administrator protection | Deactivating/demoting the last active Admin rejected; a second active Admin may be deactivated | `server/tests/lab-03/users-admin.api.test.ts` | |
+| API-21 | API | FR-20 | Admin user list — search/role filter | Correct filtering; non-Admin → 403 | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-22 | API | AC-11, BR-26 | Create user — duplicate email | 409, case-insensitive match, no user created | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-23 | API | FR-24 | Create user — invalid role | 400 | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-24 | API | FR-22 | Edit user — basic fields | Name/email/role/isActive update correctly | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-25 | API | AC-14, FR-23 | Set new initial password | mustChangePassword forced true; that user's next login requires change | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-26 | API | AC-12, BR-27 | Self-deactivation blocked | Admin cannot deactivate/demote own account | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-27 | API | AC-13, BR-28 | Last-Administrator protection | Deactivating/demoting the last active Admin rejected; a second active Admin may be deactivated | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | REGR-01 | Migration/Regression | BR-30, BR-31, AC-16 | Row-count and FK integrity before/after migration | Category/RequesterUser→User/RelatedSystem/Ticket/Attachment counts unchanged; every requesterId still resolves | `server/tests/lab-03/migration-regression.api.test.ts` | |
 | REGR-02 | Migration/Regression | FR-10 | All Lab 1/2 endpoints still function under cookie auth | Every Lab 2 API test passes after rewriting from `?requesterId=` to session auth | `server/tests/lab-03/migration-regression.api.test.ts` | |
 
@@ -88,8 +88,8 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-03f | UI Component | AC-18 (added in review of PR #67 — item 2: Owner filter only offered All/Unassigned) | Queue Owner picker | Picker is populated from `GET /api/staff/members`; selecting a specific staff member sends the matching `ownerId` query param | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-2) | Pass |
 | UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
-| UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | |
-| UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | |
+| UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 
 ## End-to-End Tests — `e2e/lab-03/` (Playwright)
 
