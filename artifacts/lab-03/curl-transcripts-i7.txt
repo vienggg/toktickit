@@ -172,6 +172,17 @@ server/tests/lab-03/staff-ticket-detail.api.test.ts, both "SEC-01") assert no
 ticket response ever contains `passwordHash` again. The "Verification" section
 below re-runs this exact request after the fix.
 
+NOTE (added after PR #68 review): the value shown as `[REDACTED]` above was a
+real bcrypt hash in the version of this file first committed and pushed. It
+was redacted by amending and force-pushing that commit, which removes it from
+this branch's reachable history (what a clone or diff of the branch tip
+shows) but does NOT purge the underlying git object from GitHub's storage —
+the original commit remains fetchable by its exact SHA. A true purge would
+require GitHub Support. Treated as low practical risk since it is a
+regression-test fixture account whose plaintext password is already
+committed in source (server/tests/helpers/testAuth.ts), not a production
+credential — but recorded accurately here rather than implying full removal.
+
 $ curl -b jar.txt -X PATCH -H 'Content-Type: application/json' -d '{"status":"RESOLVED"}' -i localhost:3000/api/staff/tickets/232/status
 (ticket 232 is NEW; NEW -> RESOLVED is not in the §6.5 matrix -- expect 409 with the permitted set)
 HTTP/1.1 409 Conflict

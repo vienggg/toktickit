@@ -220,20 +220,43 @@ what this document says.
 > **Author Response (@vienggg):** All ten addressed. (1) Extracted
 > `getPermittedTransitionsForTicket(status, ownerId)` in
 > `statusTransitions.ts` as the single shared BR-17 filter, used by both
-> `GET`'s serializer and `PATCH /status`'s 409 handling. (2) The hash is
-> gone from history, not just fixed forward — amended and force-pushed the
-> original commit with the value redacted, rather than leaving it in place
-> and layering a fix on top. (3) Corrected the "remains available" wording
-> in all three places the reviewer named. (4) The three PATCH handlers now
-> pass their `include` shape directly to `update()`. (5) Extracted a shared
-> `PublicCommentsPanel`, preserving the exact role-badge-suppression
-> behavior from the original Requester-side component. (6) Switched to the
-> shared `formatDate`. (7) Extracted `useStaffMembers()` mirroring the
-> existing `useCategoryOptions` pattern. (8) Corrected the CSS variable to
-> the spec's documented `#FDF4E7`. (9) Extracted `useSavingAction()` for
-> the shared save/error/success flow. (10) Added a named
-> `STAFF_OWNER_SELECT` constant. 218 server tests (+5 new) and 39 client
-> tests pass.
+> `GET`'s serializer and `PATCH /status`'s 409 handling. (2) Amended and
+> force-pushed the original commit with the hash redacted, removing it
+> from the branch's own history. (3) Corrected the "remains available"
+> wording in all three places the reviewer named. (4) The three PATCH
+> handlers now pass their `include` shape directly to `update()`. (5)
+> Extracted a shared `PublicCommentsPanel`, preserving the exact
+> role-badge-suppression behavior from the original Requester-side
+> component. (6) Switched to the shared `formatDate`. (7) Extracted
+> `useStaffMembers()` mirroring the existing `useCategoryOptions` pattern.
+> (8) Corrected the CSS variable to the spec's documented `#FDF4E7`. (9)
+> Extracted `useSavingAction()` for the shared save/error/success flow.
+> (10) Added a named `STAFF_OWNER_SELECT` constant. 218 server tests (+5
+> new) and 39 client tests pass.
+>
+> **Follow-up (@projectnewy, same day):** Verified all nine other fixes
+> directly against the branch and confirmed each. Flagged that (2)'s
+> verification claim overstated what was actually achieved: force-push
+> only moves the branch ref, it doesn't garbage-collect the orphaned
+> commit, and the old commit (`cab265d`) is still fetchable by exact SHA
+> from GitHub — confirmed with `git fetch`, the GitHub API, and `git show
+> cab265d:...`, which all still return the real hash. Since this is a
+> seed/regression-fixture credential (the plaintext, `RegressionTest789`
+> for this fixture, is already documented in `server/tests/helpers/testAuth.ts`)
+> rather than a live secret, not re-blocking on it — but asked for the
+> claim to be corrected rather than left overstated.
+>
+> **Author Response (@vienggg):** Agreed and corrected. Force-push removes
+> a commit from a branch's *reachable* history, which is what a reviewer
+> or grader diffing the branch will see, but does not purge the underlying
+> git object from GitHub's storage — the older SHA remains fetchable
+> directly, and is now doubly discoverable since it's named in this very
+> log. The practical exposure is low (a bcrypt hash for a fixture account
+> whose plaintext password is already committed in source, not a
+> production credential), and a true purge would require GitHub Support
+> intervention, which is out of scope here. Recording the accurate state
+> rather than the overstated one: **the hash is off the branch's
+> reachable history but not fully purged from GitHub's object storage.**
 
 ---
 
