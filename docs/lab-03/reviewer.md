@@ -21,7 +21,8 @@
 | [#65](https://github.com/vienggg/toktickit/pull/65) | feat(lab3): auth UI, routing, and Requester regression | `feature/lab3-auth-shell-and-regression` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#66](https://github.com/vienggg/toktickit/pull/66) | feat(lab3): Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#67](https://github.com/vienggg/toktickit/pull/67) | feat(lab3): IT Staff Ticket Queue | `feature/lab3-staff-queue` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
-| [#68](https://github.com/vienggg/toktickit/pull/68) | feat(lab3): IT Staff Ticket Detail | `feature/lab3-staff-ticket-detail` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
+| [#68](https://github.com/vienggg/toktickit/pull/68) | feat(lab3): IT Staff Ticket Detail | `feature/lab3-staff-ticket-detail` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
+| [#69](https://github.com/vienggg/toktickit/pull/69) | feat(lab3): Administrator User Management | `feature/lab3-user-administration` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
@@ -257,6 +258,64 @@ what this document says.
 > intervention, which is out of scope here. Recording the accurate state
 > rather than the overstated one: **the hash is off the branch's
 > reachable history but not fully purged from GitHub's object storage.**
+
+#### PR #69: Administrator User Management — Changes Requested (@projectnewy, 2026-09-18)
+
+> **Reviewer Feedback:** Nine findings, one blocking. Also confirmed
+> `SAFE_ADMIN_USER_SELECT` was correctly applied on every response with no
+> full-row leak anywhere, password hashing/`mustChangePassword` correctly
+> reused the existing helpers, `requireRole(ADMINISTRATOR)` correctly
+> excluded IT_STAFF on both server and client, and BR-27's self-block had
+> no id-comparison bug. Blocking: (1) BR-28's "last active Administrator"
+> check had a genuine TOCTOU race — the count-then-write was two separate
+> non-transactional statements with no lock, so two concurrent PATCHes
+> deactivating each other of exactly two remaining active Administrators
+> could each read "1 other active admin" before either write committed and
+> both succeed, leaving zero active Administrators, exactly what the rule
+> exists to prevent. Non-blocking: (2) the Part 7 evidence transcript's
+> Scenario 4 (IT Staff → admin users) still showed the old 404 with a note
+> promising re-capture "once I-8's routes exist" — which was now true; (3)
+> `api-spec.md`'s status-code summary table said 409 for the
+> last-Administrator rule while the implementation and detailed section
+> both used 403; (4) the duplicate-email check ran before the BR-27
+> self-modification check, so a self-deactivation attempt that also
+> collided on email returned 409 DUPLICATE_EMAIL instead of 403
+> SELF_MODIFICATION_BLOCKED; (5) the app-level email-uniqueness pre-check
+> raced the DB's unique constraint, and the losing concurrent request's
+> Prisma P2002 fell into the generic catch as an unhandled 500 instead of
+> 409; (6) BR-27/BR-28 were hand-rolled entirely inline with no extracted
+> reusable function; (7) Create User and Edit User were two fully separate
+> modals duplicating ~90% of the same form fields; (8) a locally
+> reimplemented `parseApiErrorDetailed` duplicated the already-imported
+> `parseApiError`; (9) no client test exercised `RequireRole` redirecting
+> an IT_STAFF/Requester away from `/admin/users`.
+>
+> **Author Response (@vienggg):** All nine addressed. (1) Extracted
+> `checkAdminSafetyRules(tx, ...)` and now run the BR-27/BR-28 checks, the
+> duplicate-email check, and the write inside one transaction, with an
+> explicit `SELECT ... FOR UPDATE` lock on the active-Administrator row
+> set taken before counting — this is what actually closes the race (plain
+> `$transaction` at READ COMMITTED does not), since a second transaction's
+> lock request blocks until the first commits, then re-reads the
+> now-current state. Considered and rejected Serializable isolation
+> (pushes a retry loop onto every caller for a guarantee a small explicit
+> lock gives more cheaply) and the resolution-signal route's
+> atomic-UPDATE-with-WHERE pattern (only works when the checked condition
+> lives on the row being updated itself, not on other rows — BR-28's
+> condition is about *other* active Administrators). Added a real
+> concurrency test: two `Promise.all`'d PATCHes against exactly two active
+> Administrators, asserting exactly one succeeds and at least one stays
+> active. (2) Re-captured Scenario 4 — a real 403 now. (3) Corrected the
+> status-code table to 403. (4) Reordered the checks so BR-27 runs first.
+> (5) Both `POST` and `PATCH` now catch `P2002` explicitly and return 409;
+> added a concurrency test for this too. (6) `checkAdminSafetyRules` is a
+> named, reusable function. (7) Extracted a single parameterized
+> `UserFormModal` for both Create and Edit. (8) Removed the duplicated
+> function; `parseApiError` is now a thin wrapper over a new
+> `parseApiErrorDetail` that also exposes `error.code`. (9) Added a test
+> asserting `RequireRole` redirects IT_STAFF/Requester away from
+> `/admin/users`. 251 server tests (+3 new) and 52 client tests (+2 new)
+> pass.
 
 ---
 
