@@ -40,11 +40,24 @@ export interface ApiError {
   message: string;
 }
 
+/**
+ * Extracts the displayable message AND (when present) the error `code`
+ * from either the Lab 3 `{error:{code,message}}` shape or the older Lab 2
+ * `{error: string}` shape. `parseApiError` below is a thin wrapper around
+ * this for the common case where only the message is needed — callers that
+ * need to branch on the error code (e.g. UserManagement's BR-27/BR-28
+ * inline blocking-message UI) should use this instead of duplicating the
+ * body-parsing logic themselves.
+ */
+export async function parseApiErrorDetail(res: Response, fallback: string): Promise<ApiError> {
+  const body = await res.json().catch(() => null);
+  if (!body) return { message: fallback };
+  if (typeof body.error === "string") return { message: body.error };
+  if (body.error?.message) return { code: body.error.code, message: body.error.message };
+  return { message: fallback };
+}
+
 /** Extracts a displayable message from either the Lab 3 {error:{code,message}} shape or the older Lab 2 {error: string} shape. */
 export async function parseApiError(res: Response, fallback: string): Promise<string> {
-  const body = await res.json().catch(() => null);
-  if (!body) return fallback;
-  if (typeof body.error === "string") return body.error;
-  if (body.error?.message) return body.error.message;
-  return fallback;
+  return (await parseApiErrorDetail(res, fallback)).message;
 }

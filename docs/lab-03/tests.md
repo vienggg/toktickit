@@ -72,6 +72,9 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-25 | API | AC-14, FR-23 | Set new initial password | mustChangePassword forced true; that user's next login requires change | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | API-26 | API | AC-12, BR-27 | Self-deactivation blocked | Admin cannot deactivate/demote own account | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | API-27 | API | AC-13, BR-28 | Last-Administrator protection | Deactivating/demoting the last active Admin rejected; a second active Admin may be deactivated | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-29 | API | AC-13, BR-28 (added in review of PR #69 — item 1: TOCTOU race in the last-Administrator count-then-write) | Last-Administrator protection under real concurrency | Two concurrent PATCHes, each deactivating the other of exactly two active Administrators, via `Promise.all`: exactly one succeeds (200), the other is rejected (403 LAST_ADMINISTRATOR), and a fresh DB count immediately after confirms at least one active Administrator remains | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-30 | API | AC-12, BR-27 vs BR-26 (added in review of PR #69 — item 4: ordering) | Self-modification check precedes duplicate-email check | A self-deactivation attempt whose body also collides on another user's email returns 403 SELF_MODIFICATION_BLOCKED, not 409 DUPLICATE_EMAIL | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-31 | API | BR-26 (added in review of PR #69 — item 5: app-level email pre-check races the DB unique constraint) | Duplicate-email race on create | Two concurrent `POST /api/admin/users` with the same email via `Promise.all`: one succeeds (201), the other returns 409 DUPLICATE_EMAIL (not a 500), and only one row is created | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | REGR-01 | Migration/Regression | BR-30, BR-31, AC-16 | Row-count and FK integrity before/after migration | Category/RequesterUser→User/RelatedSystem/Ticket/Attachment counts unchanged; every requesterId still resolves | `server/tests/lab-03/migration-regression.api.test.ts` | |
 | REGR-02 | Migration/Regression | FR-10 | All Lab 1/2 endpoints still function under cookie auth | Every Lab 2 API test passes after rewriting from `?requesterId=` to session auth | `server/tests/lab-03/migration-regression.api.test.ts` | |
 
@@ -90,6 +93,7 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| UI-10 | UI Component | FR-20 (added in review of PR #69 — item 9: no client test exercised RequireRole on a route this sensitive) | RequireRole guard on `/admin/users` | IT_STAFF and REQUESTER users are redirected away from `/admin/users` instead of it rendering; an ADMINISTRATOR user renders it normally | `client/tests/lab-03/ProtectedRoute.test.tsx` | Pass |
 
 ## End-to-End Tests — `e2e/lab-03/` (Playwright)
 
@@ -114,10 +118,11 @@ BR-32; IT Staff → admin users; unauthenticated → 401;
 `mustChangePassword` user → 403), plus a bonus I-7 positive-path transcript
 (claim → illegal transition 409 with permitted set).
 
-The IT-Staff-→-admin-users scenario currently returns a route-not-found 404
-rather than a role-based 403, because `/api/admin/users` is I-8's scope and
-has not been built yet; this is recorded honestly in the transcript itself
-rather than faked, and will be re-captured with a real 403 once I-8 lands.
+The IT-Staff-→-admin-users scenario was originally captured as a
+route-not-found 404 (before I-8 existed), with a note deferring re-capture.
+I-8 (Administrator User Management) has since landed on this branch, and
+the transcript was re-captured against the real routes: it now shows the
+role-based 403 the scenario was always meant to demonstrate.
 
 Capturing this transcript is also what surfaced SEC-01 above (the
 `passwordHash` leak) — the transcript file documents the finding, the fix,

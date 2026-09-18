@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { apiFetch, parseApiError } from '../api';
+import { apiFetch, parseApiError, parseApiErrorDetail } from '../api';
 import { useDebouncedValue, usePaginatedFetch, useSavingAction } from '../hooks/usePaginatedFetch';
 
 // I-8 (Issue #57): Administrator User Management. A single screen —
@@ -50,7 +50,7 @@ function StatusBadge({ isActive }: { isActive: boolean }) {
   );
 }
 
-interface UserFormState {
+interface UserFormFields {
   name: string;
   email: string;
   role: UserRole;
@@ -58,7 +58,7 @@ interface UserFormState {
   initialPassword: string;
 }
 
-const EMPTY_FORM: UserFormState = { name: '', email: '', role: 'REQUESTER', isActive: true, initialPassword: '' };
+const EMPTY_FORM: UserFormFields = { name: '', email: '', role: 'REQUESTER', isActive: true, initialPassword: '' };
 
 interface FieldErrors {
   name?: string;
@@ -75,12 +75,157 @@ function fieldErrorsFromCode(code: string | undefined, message: string): FieldEr
   return {};
 }
 
-async function parseApiErrorDetailed(res: Response, fallback: string): Promise<{ code?: string; message: string }> {
-  const body = await res.json().catch(() => null);
-  if (!body) return { message: fallback };
-  if (typeof body.error === 'string') return { message: body.error };
-  if (body.error?.message) return { code: body.error.code, message: body.error.message };
-  return { message: fallback };
+// Review item 7: Create User and Edit User were two fully separate modal
+// components duplicating ~90% of the same form fields (name/email/role/
+// isActive). This single parameterized modal covers both, driven by
+// `mode`. The two modes still differ in real ways that this component
+// preserves rather than papers over: Create has an Initial Password field
+// and no way to change an existing password; Edit has neither of those in
+// the main form, but can render arbitrary extra content below the shared
+// fields (`extraContent`) — which UserManagement uses for the separate
+// "Set New Initial Password" action and the BR-27/BR-28 blocked-message
+// banner, neither of which apply to Create.
+interface UserFormModalProps {
+  mode: 'create' | 'edit';
+  title: string;
+  formState: UserFormFields;
+  onChange: (patch: Partial<UserFormFields>) => void;
+  fieldErrors: FieldErrors;
+  /** Generic failure banner — suppressed whenever a field error or blockedMessage is already showing the reason. */
+  bannerError?: string | null;
+  /** BR-27/BR-28 safety-rule rejection message (edit mode only) — its own dedicated banner per ui-spec.md §8. */
+  blockedMessage?: string | null;
+  isSaving: boolean;
+  submitLabel: string;
+  savingLabel: string;
+  onSubmit: (e: React.FormEvent) => void;
+  onClose: () => void;
+  extraContent?: React.ReactNode;
+}
+
+function UserFormModal({
+  mode,
+  title,
+  formState,
+  onChange,
+  fieldErrors,
+  bannerError,
+  blockedMessage,
+  isSaving,
+  submitLabel,
+  savingLabel,
+  onSubmit,
+  onClose,
+  extraContent,
+}: UserFormModalProps) {
+  const idPrefix = mode;
+
+  return (
+    <div className="modal d-block" tabIndex={-1} role="dialog" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+      <div className="modal-dialog" role="document">
+        <div className="modal-content">
+          <form onSubmit={onSubmit}>
+            <div className="modal-header">
+              <h5 className="modal-title">{title}</h5>
+              <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
+            </div>
+            <div className="modal-body">
+              {blockedMessage && (
+                <div className="alert alert-warning small py-2" data-testid="admin-safety-blocked-message">
+                  {blockedMessage}
+                </div>
+              )}
+              {bannerError && !blockedMessage && !Object.keys(fieldErrors).length && (
+                <div className="alert alert-danger small py-2">{bannerError}</div>
+              )}
+              <div className="mb-3">
+                <label htmlFor={`${idPrefix}-name`} className="form-label small fw-semibold">
+                  Name
+                </label>
+                <input
+                  id={`${idPrefix}-name`}
+                  type="text"
+                  className="form-control"
+                  value={formState.name}
+                  onChange={(e) => onChange({ name: e.target.value })}
+                  required
+                />
+                {fieldErrors.name && <div className="text-danger small mt-1">{fieldErrors.name}</div>}
+              </div>
+              <div className="mb-3">
+                <label htmlFor={`${idPrefix}-email`} className="form-label small fw-semibold">
+                  Email
+                </label>
+                <input
+                  id={`${idPrefix}-email`}
+                  type="email"
+                  className="form-control"
+                  value={formState.email}
+                  onChange={(e) => onChange({ email: e.target.value })}
+                  required
+                />
+                {fieldErrors.email && <div className="text-danger small mt-1">{fieldErrors.email}</div>}
+              </div>
+              <div className="mb-3">
+                <label htmlFor={`${idPrefix}-role`} className="form-label small fw-semibold">
+                  Role
+                </label>
+                <select
+                  id={`${idPrefix}-role`}
+                  className="form-select"
+                  value={formState.role}
+                  onChange={(e) => onChange({ role: e.target.value as UserRole })}
+                >
+                  <option value="REQUESTER">Requester</option>
+                  <option value="IT_STAFF">IT Staff</option>
+                  <option value="ADMINISTRATOR">Administrator</option>
+                </select>
+                {fieldErrors.role && <div className="text-danger small mt-1">{fieldErrors.role}</div>}
+              </div>
+              <div className="mb-3 form-check form-switch">
+                <input
+                  id={`${idPrefix}-active`}
+                  type="checkbox"
+                  className="form-check-input"
+                  checked={formState.isActive}
+                  onChange={(e) => onChange({ isActive: e.target.checked })}
+                />
+                <label htmlFor={`${idPrefix}-active`} className="form-check-label small fw-semibold">
+                  Active
+                </label>
+              </div>
+              {mode === 'create' && (
+                <div className="mb-1">
+                  <label htmlFor="create-password" className="form-label small fw-semibold">
+                    Initial Password
+                  </label>
+                  <input
+                    id="create-password"
+                    type="password"
+                    className="form-control"
+                    value={formState.initialPassword}
+                    onChange={(e) => onChange({ initialPassword: e.target.value })}
+                    required
+                  />
+                  {fieldErrors.initialPassword && <div className="text-danger small mt-1">{fieldErrors.initialPassword}</div>}
+                  <div className="form-text small">At least 8 characters, including a letter and a digit.</div>
+                </div>
+              )}
+              {extraContent}
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-outline-secondary btn-sm" onClick={onClose}>
+                {mode === 'create' ? 'Cancel' : 'Close'}
+              </button>
+              <button type="submit" className="btn btn-zen-primary btn-sm" disabled={isSaving}>
+                {isSaving ? savingLabel : submitLabel}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export const UserManagement: React.FC = () => {
@@ -110,7 +255,7 @@ export const UserManagement: React.FC = () => {
 
   // Create User modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState<UserFormState>(EMPTY_FORM);
+  const [createForm, setCreateForm] = useState<UserFormFields>(EMPTY_FORM);
   const [createFieldErrors, setCreateFieldErrors] = useState<FieldErrors>({});
   const createAction = useSavingAction();
 
@@ -132,7 +277,7 @@ export const UserManagement: React.FC = () => {
           body: JSON.stringify(createForm),
         });
         if (!res.ok) {
-          const { code, message } = await parseApiErrorDetailed(res, 'Failed to create user.');
+          const { code, message } = await parseApiErrorDetail(res, 'Failed to create user.');
           const fieldErrors = fieldErrorsFromCode(code, message);
           if (Object.keys(fieldErrors).length > 0) {
             setCreateFieldErrors(fieldErrors);
@@ -150,19 +295,14 @@ export const UserManagement: React.FC = () => {
 
   // Edit User modal state
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
-  const [editForm, setEditForm] = useState<{ name: string; email: string; role: UserRole; isActive: boolean }>({
-    name: '',
-    email: '',
-    role: 'REQUESTER',
-    isActive: true,
-  });
+  const [editForm, setEditForm] = useState<UserFormFields>(EMPTY_FORM);
   const [editFieldErrors, setEditFieldErrors] = useState<FieldErrors>({});
   const [editBlockedMessage, setEditBlockedMessage] = useState<string | null>(null);
   const editAction = useSavingAction();
 
   const openEditModal = (u: AdminUser) => {
     setEditingUser(u);
-    setEditForm({ name: u.name, email: u.email, role: u.role, isActive: u.isActive });
+    setEditForm({ name: u.name, email: u.email, role: u.role, isActive: u.isActive, initialPassword: '' });
     setEditFieldErrors({});
     setEditBlockedMessage(null);
     editAction.setError(null);
@@ -184,10 +324,10 @@ export const UserManagement: React.FC = () => {
         const res = await apiFetch(`/api/admin/users/${editingUser.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(editForm),
+          body: JSON.stringify({ name: editForm.name, email: editForm.email, role: editForm.role, isActive: editForm.isActive }),
         });
         if (!res.ok) {
-          const { code, message } = await parseApiErrorDetailed(res, 'Failed to update user.');
+          const { code, message } = await parseApiErrorDetail(res, 'Failed to update user.');
           // BR-27/BR-28 safety-rule rejections (self-deactivation,
           // last-Administrator) surface as their own inline blocking
           // message rather than a generic failure banner or a field
@@ -382,247 +522,89 @@ export const UserManagement: React.FC = () => {
 
       {/* Create User modal */}
       {showCreateModal && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog" role="document">
-            <div className="modal-content">
-              <form onSubmit={handleCreateSubmit}>
-                <div className="modal-header">
-                  <h5 className="modal-title">Create User</h5>
-                  <button type="button" className="btn-close" onClick={() => setShowCreateModal(false)} aria-label="Close" />
-                </div>
-                <div className="modal-body">
-                  {createAction.error && !Object.keys(createFieldErrors).length && (
-                    <div className="alert alert-danger small py-2">{createAction.error}</div>
-                  )}
-                  <div className="mb-3">
-                    <label htmlFor="create-name" className="form-label small fw-semibold">
-                      Name
-                    </label>
-                    <input
-                      id="create-name"
-                      type="text"
-                      className="form-control"
-                      value={createForm.name}
-                      onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                      required
-                    />
-                    {createFieldErrors.name && <div className="text-danger small mt-1">{createFieldErrors.name}</div>}
-                  </div>
-                  <div className="mb-3">
-                    <label htmlFor="create-email" className="form-label small fw-semibold">
-                      Email
-                    </label>
-                    <input
-                      id="create-email"
-                      type="email"
-                      className="form-control"
-                      value={createForm.email}
-                      onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                      required
-                    />
-                    {createFieldErrors.email && <div className="text-danger small mt-1">{createFieldErrors.email}</div>}
-                  </div>
-                  <div className="mb-3">
-                    <label htmlFor="create-role" className="form-label small fw-semibold">
-                      Role
-                    </label>
-                    <select
-                      id="create-role"
-                      className="form-select"
-                      value={createForm.role}
-                      onChange={(e) => setCreateForm({ ...createForm, role: e.target.value as UserRole })}
-                    >
-                      <option value="REQUESTER">Requester</option>
-                      <option value="IT_STAFF">IT Staff</option>
-                      <option value="ADMINISTRATOR">Administrator</option>
-                    </select>
-                    {createFieldErrors.role && <div className="text-danger small mt-1">{createFieldErrors.role}</div>}
-                  </div>
-                  <div className="mb-3 form-check form-switch">
-                    <input
-                      id="create-active"
-                      type="checkbox"
-                      className="form-check-input"
-                      checked={createForm.isActive}
-                      onChange={(e) => setCreateForm({ ...createForm, isActive: e.target.checked })}
-                    />
-                    <label htmlFor="create-active" className="form-check-label small fw-semibold">
-                      Active
-                    </label>
-                  </div>
-                  <div className="mb-1">
-                    <label htmlFor="create-password" className="form-label small fw-semibold">
-                      Initial Password
-                    </label>
-                    <input
-                      id="create-password"
-                      type="password"
-                      className="form-control"
-                      value={createForm.initialPassword}
-                      onChange={(e) => setCreateForm({ ...createForm, initialPassword: e.target.value })}
-                      required
-                    />
-                    {createFieldErrors.initialPassword && (
-                      <div className="text-danger small mt-1">{createFieldErrors.initialPassword}</div>
-                    )}
-                    <div className="form-text small">At least 8 characters, including a letter and a digit.</div>
-                  </div>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => setShowCreateModal(false)}>
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-zen-primary btn-sm" disabled={createAction.isSaving}>
-                    {createAction.isSaving ? 'Creating...' : 'Create User'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+        <UserFormModal
+          mode="create"
+          title="Create User"
+          formState={createForm}
+          onChange={(patch) => setCreateForm((prev) => ({ ...prev, ...patch }))}
+          fieldErrors={createFieldErrors}
+          bannerError={createAction.error}
+          isSaving={createAction.isSaving}
+          submitLabel="Create User"
+          savingLabel="Creating..."
+          onSubmit={handleCreateSubmit}
+          onClose={() => setShowCreateModal(false)}
+        />
       )}
 
       {/* Edit User modal */}
       {editingUser && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog" role="document">
-            <div className="modal-content">
-              <form onSubmit={handleEditSubmit}>
-                <div className="modal-header">
-                  <h5 className="modal-title">Edit User</h5>
-                  <button type="button" className="btn-close" onClick={closeEditModal} aria-label="Close" />
-                </div>
-                <div className="modal-body">
-                  {editBlockedMessage && (
-                    <div className="alert alert-warning small py-2" data-testid="admin-safety-blocked-message">
-                      {editBlockedMessage}
-                    </div>
-                  )}
-                  {editAction.error && !editBlockedMessage && !Object.keys(editFieldErrors).length && (
-                    <div className="alert alert-danger small py-2">{editAction.error}</div>
-                  )}
-                  {editAction.success && <div className="alert alert-success small py-2">{editAction.success}</div>}
-                  <div className="mb-3">
-                    <label htmlFor="edit-name" className="form-label small fw-semibold">
-                      Name
-                    </label>
+        <UserFormModal
+          mode="edit"
+          title="Edit User"
+          formState={editForm}
+          onChange={(patch) => setEditForm((prev) => ({ ...prev, ...patch }))}
+          fieldErrors={editFieldErrors}
+          bannerError={editAction.error}
+          blockedMessage={editBlockedMessage}
+          isSaving={editAction.isSaving}
+          submitLabel="Save Changes"
+          savingLabel="Saving..."
+          onSubmit={handleEditSubmit}
+          onClose={closeEditModal}
+          extraContent={
+            <>
+              {editAction.success && <div className="alert alert-success small py-2">{editAction.success}</div>}
+              <div className="border-top pt-3 mt-3">
+                <h6 className="fw-bold small">Set New Initial Password</h6>
+                {passwordAction.success && !passwordConfirmStep && (
+                  <div className="alert alert-success small py-2">{passwordAction.success}</div>
+                )}
+                {!passwordConfirmStep ? (
+                  <button type="button" className="btn btn-outline-dark btn-sm" onClick={() => setPasswordConfirmStep(true)}>
+                    Set New Initial Password...
+                  </button>
+                ) : (
+                  <div className="p-2 rounded border bg-light">
+                    <p className="small text-muted mb-2">
+                      This will force <strong>{editingUser.name}</strong> to change their password at next login. Confirm the new
+                      initial password below.
+                    </p>
+                    {passwordAction.error && <div className="alert alert-danger small py-2">{passwordAction.error}</div>}
                     <input
-                      id="edit-name"
-                      type="text"
-                      className="form-control"
-                      value={editForm.name}
-                      onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                      required
+                      type="password"
+                      className="form-control mb-2"
+                      placeholder="New initial password"
+                      value={newInitialPassword}
+                      onChange={(e) => setNewInitialPassword(e.target.value)}
+                      aria-label="New initial password"
                     />
-                    {editFieldErrors.name && <div className="text-danger small mt-1">{editFieldErrors.name}</div>}
-                  </div>
-                  <div className="mb-3">
-                    <label htmlFor="edit-email" className="form-label small fw-semibold">
-                      Email
-                    </label>
-                    <input
-                      id="edit-email"
-                      type="email"
-                      className="form-control"
-                      value={editForm.email}
-                      onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
-                      required
-                    />
-                    {editFieldErrors.email && <div className="text-danger small mt-1">{editFieldErrors.email}</div>}
-                  </div>
-                  <div className="mb-3">
-                    <label htmlFor="edit-role" className="form-label small fw-semibold">
-                      Role
-                    </label>
-                    <select
-                      id="edit-role"
-                      className="form-select"
-                      value={editForm.role}
-                      onChange={(e) => setEditForm({ ...editForm, role: e.target.value as UserRole })}
-                    >
-                      <option value="REQUESTER">Requester</option>
-                      <option value="IT_STAFF">IT Staff</option>
-                      <option value="ADMINISTRATOR">Administrator</option>
-                    </select>
-                    {editFieldErrors.role && <div className="text-danger small mt-1">{editFieldErrors.role}</div>}
-                  </div>
-                  <div className="mb-3 form-check form-switch">
-                    <input
-                      id="edit-active"
-                      type="checkbox"
-                      className="form-check-input"
-                      checked={editForm.isActive}
-                      onChange={(e) => setEditForm({ ...editForm, isActive: e.target.checked })}
-                    />
-                    <label htmlFor="edit-active" className="form-check-label small fw-semibold">
-                      Active
-                    </label>
-                  </div>
-
-                  <div className="border-top pt-3 mt-3">
-                    <h6 className="fw-bold small">Set New Initial Password</h6>
-                    {passwordAction.success && !passwordConfirmStep && (
-                      <div className="alert alert-success small py-2">{passwordAction.success}</div>
-                    )}
-                    {!passwordConfirmStep ? (
+                    <div className="d-flex gap-2">
                       <button
                         type="button"
-                        className="btn btn-outline-dark btn-sm"
-                        onClick={() => setPasswordConfirmStep(true)}
+                        className="btn btn-dark btn-sm"
+                        disabled={passwordAction.isSaving || !newInitialPassword}
+                        onClick={handleSetInitialPassword}
                       >
-                        Set New Initial Password...
+                        {passwordAction.isSaving ? 'Setting...' : 'Confirm New Password'}
                       </button>
-                    ) : (
-                      <div className="p-2 rounded border bg-light">
-                        <p className="small text-muted mb-2">
-                          This will force <strong>{editingUser.name}</strong> to change their password at next login. Confirm the new
-                          initial password below.
-                        </p>
-                        {passwordAction.error && <div className="alert alert-danger small py-2">{passwordAction.error}</div>}
-                        <input
-                          type="password"
-                          className="form-control mb-2"
-                          placeholder="New initial password"
-                          value={newInitialPassword}
-                          onChange={(e) => setNewInitialPassword(e.target.value)}
-                          aria-label="New initial password"
-                        />
-                        <div className="d-flex gap-2">
-                          <button
-                            type="button"
-                            className="btn btn-dark btn-sm"
-                            disabled={passwordAction.isSaving || !newInitialPassword}
-                            onClick={handleSetInitialPassword}
-                          >
-                            {passwordAction.isSaving ? 'Setting...' : 'Confirm New Password'}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-outline-secondary btn-sm"
-                            onClick={() => {
-                              setPasswordConfirmStep(false);
-                              setNewInitialPassword('');
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
+                      <button
+                        type="button"
+                        className="btn btn-outline-secondary btn-sm"
+                        onClick={() => {
+                          setPasswordConfirmStep(false);
+                          setNewInitialPassword('');
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn btn-outline-secondary btn-sm" onClick={closeEditModal}>
-                    Close
-                  </button>
-                  <button type="submit" className="btn btn-zen-primary btn-sm" disabled={editAction.isSaving}>
-                    {editAction.isSaving ? 'Saving...' : 'Save Changes'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
+                )}
+              </div>
+            </>
+          }
+        />
       )}
     </div>
   );

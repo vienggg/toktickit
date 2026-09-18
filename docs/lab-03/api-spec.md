@@ -16,9 +16,9 @@ bearer-token header; every authenticated request relies on the browser (or a
   |---|---|
   | 400 | Validation failure — malformed body or query parameter |
   | 401 | No valid session |
-  | 403 | Authenticated but not permitted for this role/action |
+  | 403 | Authenticated but not permitted for this role/action, including BR-27 self-modification and BR-28 last-Administrator blocks |
   | 404 | Resource not found, **or** deliberately masked (see BR-32) |
-  | 409 | Conflict — duplicate email, illegal status transition, last-Administrator rule |
+  | 409 | Conflict — duplicate email, illegal status transition |
   | 500 | Unexpected server error — generic message only |
 
 ---

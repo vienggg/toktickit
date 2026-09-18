@@ -116,6 +116,32 @@ describe("Administrator User Management (API-21 – API-27)", () => {
       const afterCount = await getPrisma().user.count();
       expect(afterCount).toBe(beforeCount);
     });
+
+    // Review item 5: two concurrent creates with the same email can both
+    // pass the app-level pre-check before either insert commits; the
+    // loser must still hit Prisma's P2002 unique-constraint error and be
+    // translated to 409 DUPLICATE_EMAIL, not fall through to a 500.
+    // Promise.all against the same email is a real concurrent-request
+    // test (not merely structural), and is deterministic here because
+    // the email column has a real unique constraint for Postgres to
+    // enforce regardless of request timing.
+    it("409 DUPLICATE_EMAIL (not 500) when two concurrent creates race on the same email", async () => {
+      const email = uniqueEmail("race-create");
+      const payload = { name: "Racer", email, role: "REQUESTER", isActive: true, initialPassword: "ValidPass1" };
+
+      const [resA, resB] = await Promise.all([
+        adminAgent.post("/api/admin/users").send(payload),
+        adminAgent.post("/api/admin/users").send(payload),
+      ]);
+
+      const statuses = [resA.status, resB.status].sort();
+      expect(statuses).toEqual([201, 409]);
+      const failed = resA.status === 409 ? resA : resB;
+      expect(failed.body.error.code).toBe("DUPLICATE_EMAIL");
+
+      const count = await getPrisma().user.count({ where: { email: { equals: email, mode: "insensitive" } } });
+      expect(count).toBe(1);
+    });
   });
 
   describe("POST /api/admin/users — invalid role (API-23)", () => {
@@ -226,6 +252,27 @@ describe("Administrator User Management (API-21 – API-27)", () => {
       expect((await staffAgent.patch(`/api/admin/users/${user.id}`).send({ name: "X" })).status).toBe(403);
       expect((await requesterAgent.patch(`/api/admin/users/${user.id}`).send({ name: "X" })).status).toBe(403);
       expect((await request(app).patch(`/api/admin/users/${user.id}`).send({ name: "X" })).status).toBe(401);
+    });
+
+    // Review item 4: BR-27's self-modification check must run before the
+    // duplicate-email check, so a self-deactivation attempt that also
+    // happens to collide on email surfaces the specific
+    // SELF_MODIFICATION_BLOCKED code (which the client renders as its own
+    // dedicated blocking message) rather than the less-specific
+    // DUPLICATE_EMAIL.
+    it("a self-deactivation attempt that also collides on email returns 403 SELF_MODIFICATION_BLOCKED, not 409 DUPLICATE_EMAIL (API-26/BR-27 vs BR-26 ordering)", async () => {
+      const otherUser = await createUser({ email: uniqueEmail("collide-with-admin") });
+
+      const res = await adminAgent.patch(`/api/admin/users/${adminUserId}`).send({
+        isActive: false,
+        email: otherUser.email.toUpperCase(),
+      });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe("SELF_MODIFICATION_BLOCKED");
+
+      const dbUser = await getPrisma().user.findUnique({ where: { id: adminUserId } });
+      expect(dbUser?.isActive).toBe(true);
+      expect(dbUser?.email).not.toBe(otherUser.email.toUpperCase());
     });
   });
 
@@ -409,6 +456,61 @@ describe("Administrator User Management (API-21 – API-27)", () => {
 
       const res = await onlyAdminAgent.patch(`/api/admin/users/${onlyAdmin.id}`).send({ role: "IT_STAFF" });
       expect(res.status).toBe(403);
+
+      await getPrisma().user.update({ where: { id: adminUserId }, data: { isActive: true, role: Role.ADMINISTRATOR } });
+    });
+
+    // Review item 1 (blocking): exercises the TOCTOU race directly. With
+    // exactly two active Administrators A and B, firing "A deactivates B"
+    // and "B deactivates A" concurrently via Promise.all is the same shape
+    // of race the reviewer described — a naive count-then-write can let
+    // both through, leaving zero active Administrators. The fix
+    // (checkAdminSafetyRules' `SELECT ... FOR UPDATE` lock inside a single
+    // $transaction, in server/src/app.ts) makes Postgres serialize the two
+    // requests: whichever commits first flips its target inactive, and the
+    // second one's re-check (after being unblocked by the first's commit)
+    // must then see zero *other* active admins and get rejected. This is a
+    // real concurrent-request test, not just a structural/sequential one —
+    // supertest's agents issue independent HTTP requests, and Promise.all
+    // sends them essentially simultaneously, exercising genuine backend
+    // request concurrency.
+    it("concurrent PATCHes that would each deactivate the other of exactly two active Administrators: at most one succeeds, and at least one active Administrator always remains", async () => {
+      const adminA = await createUser({ role: Role.ADMINISTRATOR, email: uniqueEmail("race-a"), password: "RaceAdminA1" });
+      const adminB = await createUser({ role: Role.ADMINISTRATOR, email: uniqueEmail("race-b"), password: "RaceAdminB1" });
+
+      // Deactivate every other active Administrator (including the shared
+      // regression fixture) so A and B are the ONLY two active admins —
+      // otherwise the race can't reach "0 other active admins" for either.
+      await getPrisma().user.updateMany({
+        where: { role: Role.ADMINISTRATOR, isActive: true, NOT: { id: { in: [adminA.id, adminB.id] } } },
+        data: { isActive: false },
+      });
+
+      const agentA = request.agent(app);
+      const agentB = request.agent(app);
+      await agentA.post("/api/auth/login").send({ email: adminA.email, password: "RaceAdminA1" });
+      await agentB.post("/api/auth/login").send({ email: adminB.email, password: "RaceAdminB1" });
+
+      const [resAtoB, resBtoA] = await Promise.all([
+        agentA.patch(`/api/admin/users/${adminB.id}`).send({ isActive: false }),
+        agentB.patch(`/api/admin/users/${adminA.id}`).send({ isActive: false }),
+      ]);
+
+      const statuses = [resAtoB.status, resBtoA.status].sort();
+      // Exactly one of the two must succeed (200) and the other must be
+      // rejected (403 LAST_ADMINISTRATOR) — never both 200.
+      expect(statuses).toEqual([200, 403]);
+      const rejected = resAtoB.status === 403 ? resAtoB : resBtoA;
+      expect(rejected.body.error.code).toBe("LAST_ADMINISTRATOR");
+
+      // Fresh count taken immediately after, straight from the database —
+      // the actual, structural assertion that the invariant this feature
+      // exists to protect was never violated, not just that the HTTP
+      // statuses looked right.
+      const activeAdminCount = await getPrisma().user.count({
+        where: { role: Role.ADMINISTRATOR, isActive: true, id: { in: [adminA.id, adminB.id] } },
+      });
+      expect(activeAdminCount).toBe(1);
 
       await getPrisma().user.update({ where: { id: adminUserId }, data: { isActive: true, role: Role.ADMINISTRATOR } });
     });

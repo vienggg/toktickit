@@ -1775,11 +1775,134 @@ app.post(
 
       return res.status(201).json(created);
     } catch (err) {
+      // Review item 5: same app-level-pre-check-races-the-DB-constraint
+      // scenario as the PATCH route above — two concurrent creates with
+      // the same (case-insensitive) email can both pass the pre-check.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+      }
       console.error("Create user error:", err);
       return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to create user." } });
     }
   }
 );
+
+// Shared shape returned by checkAdminSafetyRules below: either the request
+// is safe to proceed (with the freshly-read target row, so callers don't
+// need a second read), or it must be rejected with a specific status/body.
+type AdminSafetyResult =
+  | { blocked: false; target: { id: number; email: string; role: Role; isActive: boolean } }
+  | { blocked: true; status: number; error: { code: string; message: string } };
+
+/**
+ * BR-27 (self-modification) + BR-28 (last-Administrator) safety rules for
+ * PATCH /api/admin/users/:id, extracted (review item 6) so any future route
+ * that can also mutate `role`/`isActive` reuses the exact same rules
+ * instead of re-deriving them inline and risking drift.
+ *
+ * MUST be called with a Prisma transaction client (`tx`), not the bare
+ * client — see the BR-28 locking comment below for why.
+ */
+async function checkAdminSafetyRules(
+  tx: Prisma.TransactionClient,
+  actingUserId: number,
+  targetId: number,
+  updates: { role?: Role; isActive?: boolean }
+): Promise<AdminSafetyResult> {
+  const target = await tx.user.findUnique({
+    where: { id: targetId },
+    select: { id: true, email: true, role: true, isActive: true },
+  });
+  if (!target) {
+    return { blocked: true, status: 404, error: { code: "NOT_FOUND", message: "User not found." } };
+  }
+
+  // BR-27: an Administrator cannot deactivate or demote their own
+  // account. Compared against the ACTING user, not the target — an
+  // Administrator may still deactivate/demote a *different* Administrator
+  // freely (subject to BR-28 below). Checked before BR-28 and before the
+  // caller's duplicate-email check (review item 4): a self-modification
+  // attempt that also happens to collide on email must surface as
+  // SELF_MODIFICATION_BLOCKED, not the less-specific DUPLICATE_EMAIL.
+  const isActingOnSelf = actingUserId === target.id;
+  const wouldDeactivateSelf = isActingOnSelf && updates.isActive === false;
+  const wouldDemoteSelf =
+    isActingOnSelf && updates.role !== undefined && updates.role !== Role.ADMINISTRATOR && target.role === Role.ADMINISTRATOR;
+  if (wouldDeactivateSelf || wouldDemoteSelf) {
+    return {
+      blocked: true,
+      status: 403,
+      error: { code: "SELF_MODIFICATION_BLOCKED", message: "You cannot deactivate or change the role of your own account." },
+    };
+  }
+
+  // BR-28: reject any update that would leave zero active Administrators
+  // system-wide. Only relevant when the TARGET user is currently an active
+  // Administrator and the update would make them inactive or
+  // non-Administrator.
+  //
+  // Race-condition fix (review item 1): the previous version counted
+  // "other active Administrators" with a plain SELECT, then wrote, as two
+  // separate non-transactional statements. With exactly two active
+  // Administrators A and B, concurrent PATCHes (A deactivating B, B
+  // deactivating A) could each read "1 other active admin" before either
+  // write committed, and both would pass — leaving zero active
+  // Administrators, exactly the outcome this rule exists to prevent.
+  //
+  // Fix: take an explicit row lock (`SELECT ... FOR UPDATE`) on the full
+  // set of currently-active-Administrator rows, INSIDE this transaction,
+  // before counting. This is what actually closes the race, and plain
+  // `$transaction` at the default READ COMMITTED isolation level does NOT
+  // do it on its own — a count-then-write with no lock can still run
+  // concurrently with another transaction's count-then-write over the same
+  // rows, because neither statement blocks the other. `FOR UPDATE` does:
+  // when transaction T2 tries to lock the same admin rows T1 already
+  // locked, Postgres blocks T2 until T1 commits or rolls back. Once T1
+  // commits (e.g. deactivating B), T2's SELECT ... FOR UPDATE unblocks and
+  // re-reads the now-committed state — so T2's subsequent count correctly
+  // sees B as no longer active. This makes two concurrent "deactivate the
+  // other admin" requests serialize into first-committer-wins, and the
+  // second one's count will correctly come up "0 others" and be rejected.
+  //
+  // Serializable isolation (with retry-on-serialization-failure) was
+  // considered instead, but rejected here: it would push a retry loop onto
+  // every caller of this function for a guarantee that a single explicit
+  // lock over a small, well-known row set (there are only ever a handful
+  // of active Administrators) provides directly and more cheaply. An
+  // atomic single-UPDATE-with-WHERE-subquery (the `resolution-signal`
+  // route's pattern above) was also considered, but doesn't fit here: that
+  // pattern works because the condition being checked lives entirely on
+  // the ROW BEING UPDATED (its own `requesterResolvedAt`/`status`), so
+  // Postgres's normal per-row lock on the UPDATE target is sufficient by
+  // itself. BR-28's condition depends on the state of OTHER rows (the
+  // other active Administrators), which a WHERE-subquery on the target row
+  // does not lock — a concurrent transaction could still read those other
+  // rows' pre-commit state. Locking that set explicitly is required.
+  const targetIsCurrentlyActiveAdmin = target.role === Role.ADMINISTRATOR && target.isActive;
+  const targetWouldStopBeingActiveAdmin =
+    targetIsCurrentlyActiveAdmin &&
+    ((updates.isActive === false) || (updates.role !== undefined && updates.role !== Role.ADMINISTRATOR));
+  if (targetWouldStopBeingActiveAdmin) {
+    // Physical table is "RequesterUser" (see schema.prisma's @@map on the
+    // User model, D-03) — the raw lock statement must target that name.
+    await tx.$queryRaw`SELECT id FROM "RequesterUser" WHERE role = 'ADMINISTRATOR' AND "isActive" = true FOR UPDATE`;
+    const otherActiveAdminCount = await tx.user.count({
+      where: { role: Role.ADMINISTRATOR, isActive: true, NOT: { id: target.id } },
+    });
+    if (otherActiveAdminCount === 0) {
+      return {
+        blocked: true,
+        status: 403,
+        error: {
+          code: "LAST_ADMINISTRATOR",
+          message: "This action would leave zero active Administrator accounts and is not permitted.",
+        },
+      };
+    }
+  }
+
+  return { blocked: false, target };
+}
 
 app.patch(
   "/api/admin/users/:id",
@@ -1793,24 +1916,19 @@ app.patch(
         return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid user ID." } });
       }
 
-      const target = await getPrisma().user.findUnique({
-        where: { id },
-        select: { id: true, email: true, role: true, isActive: true },
-      });
-      if (!target) {
-        return res.status(404).json({ error: { code: "NOT_FOUND", message: "User not found." } });
-      }
-
       const { name, email, role, isActive } = req.body ?? {};
-      const data: Prisma.UserUpdateInput = {};
 
-      if (name !== undefined) {
-        if (typeof name !== "string" || name.trim().length === 0) {
-          return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'name' must be a non-empty string." } });
-        }
-        data.name = name.trim();
+      // Field-shape validation that doesn't need the database, kept as a
+      // fast fail before opening a transaction.
+      if (name !== undefined && (typeof name !== "string" || name.trim().length === 0)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'name' must be a non-empty string." } });
       }
-
+      if (role !== undefined && (typeof role !== "string" || !VALID_ROLES.includes(role))) {
+        return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}.`));
+      }
+      if (isActive !== undefined && typeof isActive !== "boolean") {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'isActive' must be a boolean." } });
+      }
       let normalizedEmail: string | undefined;
       if (email !== undefined) {
         const parsed = validateEmailFormat(email);
@@ -1818,78 +1936,68 @@ app.patch(
           return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'email' must be a valid email address." } });
         }
         normalizedEmail = parsed;
-        // BR-26: uniqueness excludes the target user's own current row.
-        const duplicate = await getPrisma().user.findFirst({
-          where: { email: { equals: normalizedEmail, mode: "insensitive" }, NOT: { id } },
-          select: { id: true },
-        });
-        if (duplicate) {
-          return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
-        }
-        data.email = normalizedEmail;
       }
 
-      if (role !== undefined) {
-        if (typeof role !== "string" || !VALID_ROLES.includes(role)) {
-          return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}.`));
-        }
-        data.role = role as Role;
-      }
-
-      if (isActive !== undefined) {
-        if (typeof isActive !== "boolean") {
-          return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'isActive' must be a boolean." } });
-        }
-        data.isActive = isActive;
-      }
-
-      // BR-27: an Administrator cannot deactivate or demote their own
-      // account. Compared against the ACTING user (req.authUser!.id), not
-      // the target — an Administrator may still deactivate/demote a
-      // *different* Administrator freely (subject to BR-28 below).
       const actingUserId = req.authUser!.id;
-      const isActingOnSelf = actingUserId === target.id;
-      const wouldDeactivateSelf = isActingOnSelf && isActive === false;
-      const wouldDemoteSelf = isActingOnSelf && role !== undefined && role !== Role.ADMINISTRATOR && target.role === Role.ADMINISTRATOR;
-      if (wouldDeactivateSelf || wouldDemoteSelf) {
-        return res.status(403).json({
-          error: { code: "SELF_MODIFICATION_BLOCKED", message: "You cannot deactivate or change the role of your own account." },
-        });
-      }
 
-      // BR-28: reject any update that would leave zero active
-      // Administrators system-wide. Only relevant when the TARGET user is
-      // currently an active Administrator and the update would make them
-      // inactive or non-Administrator. The count of "other" active
-      // Administrators is taken fresh from the database, excluding the
-      // target row itself, so it reflects the true state at write time
-      // rather than a stale in-memory count computed before this request.
-      const targetIsCurrentlyActiveAdmin = target.role === Role.ADMINISTRATOR && target.isActive;
-      const targetWouldStopBeingActiveAdmin =
-        targetIsCurrentlyActiveAdmin &&
-        ((isActive === false) || (role !== undefined && role !== Role.ADMINISTRATOR));
-      if (targetWouldStopBeingActiveAdmin) {
-        const otherActiveAdminCount = await getPrisma().user.count({
-          where: { role: Role.ADMINISTRATOR, isActive: true, NOT: { id: target.id } },
+      // Everything from here on — the BR-27/BR-28 safety check, the
+      // duplicate-email check, and the write — runs inside one
+      // transaction, so the LAST_ADMINISTRATOR lock (inside
+      // checkAdminSafetyRules) actually covers the write it's protecting,
+      // and a concurrent duplicate-email race hits Prisma's own unique
+      // constraint (handled in the catch block below, review item 5)
+      // rather than a stale pre-check.
+      const result = await getPrisma().$transaction(async (tx) => {
+        const safety = await checkAdminSafetyRules(tx, actingUserId, id, {
+          role: role !== undefined ? (role as Role) : undefined,
+          isActive,
         });
-        if (otherActiveAdminCount === 0) {
-          return res.status(403).json({
-            error: {
-              code: "LAST_ADMINISTRATOR",
-              message: "This action would leave zero active Administrator accounts and is not permitted.",
-            },
-          });
+        if (safety.blocked) {
+          return safety;
         }
-      }
 
-      const updated = await getPrisma().user.update({
-        where: { id },
-        data,
-        select: SAFE_ADMIN_USER_SELECT,
+        const data: Prisma.UserUpdateInput = {};
+        if (name !== undefined) data.name = (name as string).trim();
+        if (role !== undefined) data.role = role as Role;
+        if (isActive !== undefined) data.isActive = isActive;
+
+        if (normalizedEmail !== undefined) {
+          // BR-26: uniqueness excludes the target user's own current row.
+          // This app-level pre-check is a fast, friendly 409 for the
+          // common case; the catch block below still handles the rarer
+          // race where a concurrent request slips a duplicate past this
+          // check (review item 5).
+          const duplicate = await tx.user.findFirst({
+            where: { email: { equals: normalizedEmail, mode: "insensitive" }, NOT: { id } },
+            select: { id: true },
+          });
+          if (duplicate) {
+            return {
+              blocked: true as const,
+              status: 409,
+              error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." },
+            };
+          }
+          data.email = normalizedEmail;
+        }
+
+        const updated = await tx.user.update({ where: { id }, data, select: SAFE_ADMIN_USER_SELECT });
+        return { blocked: false as const, updated };
       });
 
-      return res.status(200).json(updated);
+      if (result.blocked) {
+        return res.status(result.status).json({ error: result.error });
+      }
+      return res.status(200).json(result.updated);
     } catch (err) {
+      // Review item 5: a concurrent create/edit with the same (case-
+      // insensitive) email can both pass the app-level pre-check above and
+      // then race each other into Prisma's own unique constraint. The
+      // losing write must still surface as 409 DUPLICATE_EMAIL, not fall
+      // through to a generic 500.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+      }
       console.error("Update user error:", err);
       return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update user." } });
     }
