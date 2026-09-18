@@ -16,8 +16,9 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     // user-management folder: list view at all 3 viewports.
     await shoot(page, "user-management", "Figure-user-list", "all");
 
-    // Create User modal.
-    await page.setViewportSize({ width: 1280, height: 900 });
+    // Create User modal. shoot(..., "all") restores whatever viewport it
+    // was called at (review of PR #70, item 3), so no manual reset is
+    // needed between captures any more.
     await page.getByRole("button", { name: /\+ create user/i }).click();
     await expect(page.getByRole("heading", { name: /^create user$/i })).toBeVisible();
     await shoot(page, "user-management", "Figure-create-user-modal", "all");
@@ -27,7 +28,6 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     const newUserName = `E2E Admin Flow User ${stamp}`;
     const initialPassword = "TempInitPass789";
 
-    await page.setViewportSize({ width: 1280, height: 900 });
     // Scoped to the modal dialog — the page behind it also has a "ROLE"
     // filter <select>, which a bare getByLabel(/role/i) would also match.
     const createModal = page.getByRole("dialog");
@@ -49,7 +49,6 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     await row.getByRole("button", { name: /^edit$/i }).click();
     await expect(page.getByRole("heading", { name: /^edit user$/i })).toBeVisible();
     await shoot(page, "user-management", "Figure-edit-user-modal", "all");
-    await page.setViewportSize({ width: 1280, height: 900 });
     // The modal footer's "Close" button and its header's little X
     // (btn-close, aria-label "Close") both match a role+name query for
     // "Close" — scope to the footer button specifically by its class.

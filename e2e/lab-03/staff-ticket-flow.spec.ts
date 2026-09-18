@@ -29,13 +29,13 @@ test.describe("E2E-03: full staff ticket workflow", () => {
     await shoot(page, "staff-queue", "Figure-queue-overview", "all");
 
     // Find the fresh fixture ticket via the search box, independent of
-    // whatever page/sort state the queue defaults to. Resize back to
-    // desktop first since the mobile/tablet shots above changed the
-    // viewport — the desktop table, tablet table, and mobile cards are all
-    // present in the DOM simultaneously (Bootstrap display-utility
-    // breakpoints hide the other two via CSS), so a bare text/row locator
-    // would match all three and violate Playwright's strict mode.
-    await page.setViewportSize({ width: 1280, height: 900 });
+    // whatever page/sort state the queue defaults to. shoot(..., "all")
+    // above already restores the desktop viewport it was called at, so no
+    // manual reset is needed here (review of PR #70, item 3) — the desktop
+    // table, tablet table, and mobile cards are all present in the DOM
+    // simultaneously (Bootstrap display-utility breakpoints hide the other
+    // two via CSS), so a bare text/row locator would match all three and
+    // violate Playwright's strict mode.
     await page.getByLabel(/search/i).fill(ticketNumber);
     const desktopTable = page.locator(".d-none.d-lg-block");
     await expect(desktopTable.getByText(ticketNumber)).toBeVisible({ timeout: 10_000 });
@@ -57,12 +57,25 @@ test.describe("E2E-03: full staff ticket workflow", () => {
     await expect(internalNotesPanel).toBeVisible();
     await expect(internalNotesPanel).toContainText(/internal — not visible to requester/i);
 
-    // Claim (the fixture ticket is created unassigned).
+    // Claim. The fixture ticket is always freshly created and unowned (see
+    // createFreshTicketAsRequester in api-fixtures.ts), so the Claim button
+    // MUST be visible here — asserting that (rather than conditionally
+    // clicking it only `if` it happens to be visible) makes this a real
+    // regression check: if a future change stopped the button from
+    // rendering at all, this now fails loudly instead of silently passing
+    // (review of PR #70, item 2).
     const claimButton = page.getByRole("button", { name: /^claim$/i });
-    if (await claimButton.isVisible().catch(() => false)) {
-      await claimButton.click();
-      await expect(page.getByText(/owner updated/i)).toBeVisible({ timeout: 10_000 });
-    }
+    await expect(claimButton).toBeVisible();
+    await claimButton.click();
+    await expect(page.getByText(/owner updated/i)).toBeVisible({ timeout: 10_000 });
+
+    // Confirm ownership actually changed — not just that the Claim button
+    // disappeared (which would also be true if claiming silently no-opped),
+    // but that the Owner select now reflects the acting staff user.
+    const ownerSelect = page.locator("#owner-select");
+    await expect(ownerSelect).toHaveValue(/^\d+$/, { timeout: 10_000 });
+    await expect(page.locator("#owner-select option:checked")).toHaveText(/regression suite staff/i);
+
     // After claiming, the Claim button disappears because ticket.ownerId
     // is now set (StaffTicketDetail only renders it while unowned).
     await expect(page.getByRole("button", { name: /^claim$/i })).not.toBeVisible();

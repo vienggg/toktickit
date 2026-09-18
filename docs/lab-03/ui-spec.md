@@ -159,25 +159,48 @@ new screen listed above.
       `StaffTicketQueue.tsx`, and `UserManagement.tsx` during I-9; not a
       Playwright-checkable "true" until role-specific navigation is built
       into those screens.)
-- [x] Status badges use the 7-color scale in §1 and never reuse a Priority
-      badge color for a Status value. Verified in
-      `e2e/lab-03/visual-inspection.spec.ts` ("status badges never reuse a
-      priority badge's background color") by comparing the computed
-      `background-color` of a `[data-testid=status-badge]` and a
+- [x] Status badges never reuse a Priority badge's background color.
+      Verified in `e2e/lab-03/visual-inspection.spec.ts` ("status badges
+      never reuse a priority badge's background color") by comparing the
+      computed `background-color` of a `[data-testid=status-badge]` and a
       `[data-testid=priority-badge]` on the Staff Queue — they differ.
+      (Narrowed in review of PR #70, item 5 — the original wording also
+      claimed status badges "use the 7-color scale in §1", which this test
+      never checked: it only asserts the two colors differ, not that either
+      one is drawn from the declared palette. On inspection, that broader
+      claim does not currently hold either way: `StatusBadge` in
+      `StaffTicketQueue.tsx` applies classes like `zen-badge-status-open`,
+      but no CSS file in `client/src` defines a `zen-badge-status-*` class
+      or the `--color-status-*` custom properties §1 declares — only
+      `--color-internal-note-bg` is actually defined in `client/src/index.css`.
+      Status badges therefore currently render as unstyled Bootstrap
+      `.badge` elements, not the declared 7-color scale. Fixing that
+      implementation gap is out of scope for this checklist-wording fix; it
+      is flagged separately as its own follow-up.)
 - [x] Public Comments and Internal Notes panels are visually distinguishable
       at a glance, including on a 375px screen where they stack vertically.
       Verified in `e2e/lab-03/visual-inspection.spec.ts` ("panel backgrounds
       differ on a mobile viewport") by comparing computed background colors
       of the Internal Notes panel (`--color-internal-note-bg`) and the
       Public Comments section at a 375px viewport on Staff Ticket Detail.
-- [x] Editable vs. read-only fields (Requested Priority vs. IT Priority; Ticket
-      Owner select vs. static "Unassigned" text) are distinguishable using the
-      Lab 2 read-only background convention. Verified in
-      `e2e/lab-03/visual-inspection.spec.ts` ("Requested Priority renders as
-      static text while IT Priority renders as a select") by asserting the
-      Requested Priority container contains no `<select>`/`<input>` while
-      `#it-priority-select` is a real, interactive `<select>`.
+- [x] Editable vs. read-only fields (Requested Priority vs. IT Priority) are
+      distinguishable using the Lab 2 read-only background convention.
+      Verified in `e2e/lab-03/visual-inspection.spec.ts` ("Requested Priority
+      renders as static text while IT Priority renders as a select") by
+      asserting the Requested Priority container contains no
+      `<select>`/`<input>` while `#it-priority-select` is a real, interactive
+      `<select>`.
+- [ ] "Ticket Owner select vs. static 'Unassigned' text" are distinguishable.
+      (Corrected in review of PR #70, item 4 — this half of the item as
+      originally written describes a UI state that does not exist:
+      `StaffTicketDetail.tsx`'s Owner field is always a single `<select
+      id="owner-select">`, with "Unassigned" as one of its own `<option>`
+      values (`<option value="">Unassigned</option>`), not a separate
+      static-text state rendered instead of the select when there is no
+      owner. There is nothing to distinguish "select" from "static text"
+      for Owner because Owner is never static text. Left unchecked, honestly,
+      rather than checked against a test that only exercises the unrelated
+      Requested-Priority/IT-Priority pair on this same original line.)
 - [ ] Validation errors render beneath their field on every new form (Login,
       Change Password, Create/Edit User). (Only partially true, not checked
       off wholesale: `UserManagement.tsx`'s Create/Edit User modals do
@@ -212,6 +235,11 @@ new screen listed above.
       unstyled browser error page. Verified in
       `e2e/lab-03/visual-inspection.spec.ts`: an IT Staff session hitting
       the Administrator-only `/admin/users` is redirected (not blank, and
-      the resulting page has non-empty body text), and an unauthenticated
+      the resulting page has non-empty body text), an unauthenticated
       session hitting `/staff/queue` lands on a rendered `/login` form
-      rather than a blank page.
+      rather than a blank page, and (added in review of PR #70, item 6) a
+      genuinely nonexistent ticket ID at `/staff/tickets/99999999` renders a
+      styled `.alert-danger` error message with a working "Back to Queue"
+      button rather than a blank screen — `StaffTicketDetail.tsx`'s
+      `loadError` branch already handled this correctly; it just had no
+      test hitting the real not-found path.

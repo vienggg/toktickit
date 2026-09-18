@@ -63,10 +63,24 @@ export async function shoot(
 
   const targets = viewport === "all" ? (Object.keys(VIEWPORTS) as (keyof typeof VIEWPORTS)[]) : [viewport];
 
+  // Capturing "all" iterates desktop -> tablet -> mobile and, without this,
+  // left the page stuck at the last (mobile, 375x812) viewport afterward —
+  // an undocumented side effect that every subsequent interaction in the
+  // calling spec then silently ran under. Callers worked around it with
+  // hand-rolled `page.setViewportSize(...)` resets scattered after each
+  // "all" capture (review of PR #70, item 3); fixing it once here, by
+  // restoring whatever viewport the page was actually at before this call,
+  // removes the need for every one of those call sites.
+  const originalViewport = page.viewportSize();
+
   for (const vp of targets) {
     await page.setViewportSize(VIEWPORTS[vp]);
     await page.waitForLoadState("networkidle");
     const file = path.join(dir, `${figure}@${vp}.png`);
     await page.screenshot({ path: file, fullPage: true });
+  }
+
+  if (viewport === "all" && originalViewport) {
+    await page.setViewportSize(originalViewport);
   }
 }

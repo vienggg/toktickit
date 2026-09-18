@@ -101,7 +101,7 @@ Security/Authorization · Migration/Regression · End-to-End.
 |---|---|---|---|---|---|---|
 | E2E-01 | E2E | AC-01, AC-07, AC-15 | Login → app → logout → blocked | Full session lifecycle; direct navigation to a protected route after logout redirects to `/login` | `e2e/lab-03/authentication.spec.ts` | Pass |
 | E2E-02 | E2E | AC-02 | Initial password login and change | Normal app opens only after a valid password change | `e2e/lab-03/authentication.spec.ts` | Pass |
-| E2E-03 | E2E | FR-14–FR-19 | Full staff workflow | Queue → open Ticket → claim → set IT Priority → change status → post comment → post note | `e2e/lab-03/staff-ticket-flow.spec.ts` | Pass |
+| E2E-03 | E2E | FR-14–FR-19 | Full staff workflow | Queue → open Ticket → claim (asserted visible and clicked unconditionally, then owner-select value confirmed to change — not merely that the Claim button disappeared; corrected in review of PR #70, item 2) → set IT Priority → change status → post comment → post note | `e2e/lab-03/staff-ticket-flow.spec.ts` | Pass |
 | E2E-04 | E2E | FR-20–FR-23 | Full admin workflow | Create user → set initial password → that user's forced change at next login | `e2e/lab-03/user-administration.spec.ts` | Pass |
 
 `e2e/lab-03/visual-inspection.spec.ts` additionally backs the §10 Visual
@@ -140,7 +140,20 @@ and a re-run of the same request confirming it.
 Captured via `e2e/lab-03/capture.ts` (see `sprint-plan.md` §3). Folders exactly
 as required: `artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`,
 no 5th folder. Full manifest as of the I-9 run (`npx playwright test
-e2e/lab-03/`, 13/13 passing):
+e2e/lab-03/`, 13/13 passing; a 14th test — the not-found-ticket check added
+in review of PR #70, item 6 — was added afterward and does not change this
+screenshot manifest):
+
+**Fixture-account dependency (review of PR #70, item 1):** every spec in
+this directory authenticates as one of the `regression-suite-{requester,
+staff,admin}@toktick.internal` accounts. These are provisioned by
+`e2e/lab-03/global-setup.ts` (wired via `playwright.config.ts`'s
+`globalSetup`), which calls the same `ensureRegression*()` upserts
+`server/tests/helpers/testAuth.ts` defines, directly against Prisma, once
+before this whole suite runs. This is independent of the server's own
+vitest suite ever having run against the same database — a fresh clone that
+only migrates, seeds, and starts the dev servers now provisions these
+accounts itself before the first spec's `login()` call.
 
 ```
 artifacts/lab-03/screenshots/authentication/Figure-after-logout@desktop.png

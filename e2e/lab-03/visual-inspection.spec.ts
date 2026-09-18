@@ -127,6 +127,26 @@ test.describe("Visual inspection checklist — forbidden states never render bla
     await expect(page.getByLabel(/email/i)).toBeVisible();
     await ctx.close();
   });
+
+  // Review of PR #70, item 6: the two scenarios above only cover
+  // "forbidden" (wrong role / unauthenticated) — neither hits a genuine
+  // not-found ticket ID. GET /api/staff/tickets/:id returns a real 404 for
+  // a nonexistent ticket (server/tests/lab-03/staff-ticket-detail.api.test.ts,
+  // "404 for a nonexistent ticket"); this confirms the client actually
+  // surfaces that as a visible, styled message rather than a blank screen.
+  test("a genuinely not-found ticket ID renders a styled error, not a blank screen", async ({ page }) => {
+    await login(page, REGRESSION_STAFF_EMAIL, REGRESSION_STAFF_PASSWORD);
+    await page.goto("/staff/tickets/99999999");
+
+    const errorAlert = page.locator(".alert-danger");
+    await expect(errorAlert).toBeVisible({ timeout: 10_000 });
+    const bodyText = await page.evaluate(() => document.body.innerText.trim());
+    expect(bodyText.length).toBeGreaterThan(0);
+
+    // A way back to a working screen must also be present — this is not
+    // just a message dead-ending the user.
+    await expect(page.getByRole("button", { name: /back to queue/i })).toBeVisible();
+  });
 });
 
 test.describe("Visual inspection checklist — no clipping of badges/owner names at 375px", () => {
