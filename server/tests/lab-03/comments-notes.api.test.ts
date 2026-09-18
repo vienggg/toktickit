@@ -6,6 +6,8 @@ import { getPrisma } from '../../src/prisma.js';
 import {
   loginAsRegressionRequester,
   loginAsRegressionOtherRequester,
+  loginAsRegressionStaff,
+  loginAsRegressionAdmin,
   REGRESSION_REQUESTER_EMAIL,
 } from '../helpers/testAuth.js';
 
@@ -198,6 +200,99 @@ describe('Public Comments and Resolution Signal (API-18, API-19)', () => {
     it('API-18e: an unauthenticated request is rejected with 401', async () => {
       const res = await request(app).post(`/api/tickets/${ticketId}/resolution-signal`);
       expect(res.status).toBe(401);
+    });
+  });
+
+  // Internal Notes (API-08, API-20, AC-04/BR-24) are added in I-7 and
+  // extend this same file rather than duplicating it, per the header
+  // comment above and docs/lab-03/tests.md.
+  describe('GET/POST /api/tickets/:id/internal-notes (API-08, API-20)', () => {
+    let staffAgent: SuperTestAgent;
+    let adminAgent: SuperTestAgent;
+
+    beforeAll(async () => {
+      staffAgent = await loginAsRegressionStaff();
+      adminAgent = await loginAsRegressionAdmin();
+    });
+
+    it('API-20a: IT Staff can create and list Internal Notes', async () => {
+      const postRes = await staffAgent.post(`/api/tickets/${ticketId}/internal-notes`).send({ body: 'Checked event logs, nothing unusual.' });
+      expect(postRes.status).toBe(201);
+      expect(postRes.body.body).toBe('Checked event logs, nothing unusual.');
+      expect(postRes.body.authorId).toBeDefined();
+      expect(postRes.body.createdAt).toBeDefined();
+
+      const listRes = await staffAgent.get(`/api/tickets/${ticketId}/internal-notes`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.some((n: { body: string }) => n.body === 'Checked event logs, nothing unusual.')).toBe(true);
+    });
+
+    it('API-20b: Administrator can also create and list Internal Notes', async () => {
+      const postRes = await adminAgent.post(`/api/tickets/${ticketId}/internal-notes`).send({ body: 'Escalating to vendor support.' });
+      expect(postRes.status).toBe(201);
+
+      const listRes = await adminAgent.get(`/api/tickets/${ticketId}/internal-notes`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.some((n: { body: string }) => n.body === 'Escalating to vendor support.')).toBe(true);
+    });
+
+    it('API-08/API-20c: a Requester GET returns 403 with genuinely no note content of any kind (BR-24)', async () => {
+      const res = await agent.get(`/api/tickets/${ticketId}/internal-notes`);
+      expect(res.status).toBe(403);
+      // Not just a particular error code — assert the body has no
+      // note-shaped data at all: no array, no count, no "notes" key.
+      expect(Array.isArray(res.body)).toBe(false);
+      expect(res.body.notes).toBeUndefined();
+      expect(res.body.count).toBeUndefined();
+      expect(res.body.length).toBeUndefined();
+      expect(JSON.stringify(res.body)).not.toMatch(/vendor support|event logs/i);
+    });
+
+    it('API-08/API-20d: a Requester POST also returns 403 with no note content leaked', async () => {
+      const res = await agent.post(`/api/tickets/${ticketId}/internal-notes`).send({ body: 'Attempted note from a Requester' });
+      expect(res.status).toBe(403);
+      expect(Array.isArray(res.body)).toBe(false);
+      expect(res.body.body).toBeUndefined();
+      expect(res.body.id).toBeUndefined();
+
+      // And it must not actually have been created.
+      const staffListRes = await staffAgent.get(`/api/tickets/${ticketId}/internal-notes`);
+      expect(staffListRes.body.some((n: { body: string }) => n.body === 'Attempted note from a Requester')).toBe(false);
+    });
+
+    it('API-20e: an unauthenticated request is rejected with 401', async () => {
+      const getRes = await request(app).get(`/api/tickets/${ticketId}/internal-notes`);
+      expect(getRes.status).toBe(401);
+      const postRes = await request(app).post(`/api/tickets/${ticketId}/internal-notes`).send({ body: 'x' });
+      expect(postRes.status).toBe(401);
+    });
+
+    it('API-20f: rejects whitespace-only content (BR-23)', async () => {
+      const res = await staffAgent.post(`/api/tickets/${ticketId}/internal-notes`).send({ body: '   ' });
+      expect(res.status).toBe(400);
+    });
+
+    it('API-20g: rejects content over 2000 characters (BR-23)', async () => {
+      const res = await staffAgent.post(`/api/tickets/${ticketId}/internal-notes`).send({ body: 'x'.repeat(2001) });
+      expect(res.status).toBe(400);
+    });
+
+    it('API-20h: author and timestamp are server-set, not trusted from the client (BR-22)', async () => {
+      const res = await staffAgent
+        .post(`/api/tickets/${ticketId}/internal-notes`)
+        .send({ body: 'Trying to spoof metadata', authorId: 999999, createdAt: '2000-01-01T00:00:00Z' });
+      expect(res.status).toBe(201);
+      expect(res.body.authorId).not.toBe(999999);
+      expect(new Date(res.body.createdAt).getFullYear()).toBeGreaterThan(2000);
+    });
+
+    it('API-20i: there is no update or delete endpoint for a note (append-only, BR-21)', async () => {
+      const listRes = await staffAgent.get(`/api/tickets/${ticketId}/internal-notes`);
+      const noteId = listRes.body[0].id;
+      const patchRes = await staffAgent.patch(`/api/tickets/${ticketId}/internal-notes/${noteId}`).send({ body: 'edited' });
+      expect(patchRes.status).toBe(404); // no such route exists at all
+      const deleteRes = await staffAgent.delete(`/api/tickets/${ticketId}/internal-notes/${noteId}`);
+      expect(deleteRes.status).toBe(404);
     });
   });
 });

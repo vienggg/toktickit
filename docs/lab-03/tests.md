@@ -32,8 +32,9 @@ Security/Authorization · Migration/Regression · End-to-End.
 |---|---|---|---|---|---|---|
 | UNIT-01 | Unit | BR-12 | Password hash/verify round-trip | Hash never equals plaintext; verify succeeds only for correct password | `server/tests/lab-03/password.unit.test.ts` | Pass |
 | UNIT-02 | Unit | BR-09 | Password policy validator | Rejects <8 chars, no letter, or no digit; accepts a compliant password | `server/tests/lab-03/password.unit.test.ts` | Pass |
-| UNIT-03 | Unit | BR-19, §6.5 | Status transition matrix — all legal edges | Every ✅ cell in §6.5 returns permitted=true | `server/tests/lab-03/status-transitions.unit.test.ts` | |
-| UNIT-04 | Unit | BR-19, §6.5 | Status transition matrix — all illegal edges | Every non-✅ cell returns permitted=false with the correct permitted-set | `server/tests/lab-03/status-transitions.unit.test.ts` | |
+| UNIT-03 | Unit | BR-19, §6.5 | Status transition matrix — all legal edges | Every ✅ cell in §6.5 returns permitted=true | `server/tests/lab-03/status-transitions.unit.test.ts` | Pass |
+| UNIT-04 | Unit | BR-19, §6.5 | Status transition matrix — all illegal edges | Every non-✅ cell returns permitted=false with the correct permitted-set | `server/tests/lab-03/status-transitions.unit.test.ts` | Pass |
+| UNIT-05 | Unit | BR-17 (added in review of PR #68 — item 1: `getPermittedTransitionsForTicket` extracted so `GET`'s serializer and `PATCH /status` share one BR-17 filter instead of two independent copies) | `getPermittedTransitionsForTicket` helper | Excludes `IN_PROGRESS` when `ownerId` is `null`; includes it once owned; leaves other statuses' permitted sets unchanged | `server/tests/lab-03/status-transitions.unit.test.ts` | Pass |
 | API-01 | API | AC-01 | Valid login | 200, authenticated cookie set, safe user object (no hash) | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-02 | API | AC-05, BR-06 | Invalid credentials | 401, generic message, identical for wrong password and unknown email | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-03 | API | AC-06, BR-07 | Inactive account, correct password | 403, deactivation message | `server/tests/lab-03/auth.api.test.ts` | Pass |
@@ -41,27 +42,29 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-05 | API | FR-03 | GET /api/auth/me | 200 with role and mustChangePassword; 401 unauthenticated | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-06 | API | AC-02, AC-14, BR-02, BR-10 | Change password (forced) | 200, mustChangePassword cleared; rejects reusing initial password; rejects mismatch | `server/tests/lab-03/auth.api.test.ts` | Pass |
 | API-07 | API | AC-02, FR-04 | mustChangePassword lockout | Any non-allowlisted route returns 403 while true | `server/tests/lab-03/authorization.api.test.ts` | Pass |
-| API-08 | API | AC-04, BR-24 | Requester requests Internal Notes | 403, empty body, no note content leaked | `server/tests/lab-03/comments-notes.api.test.ts` | *(I-7 — Internal Notes endpoint does not exist until then)* |
+| API-08 | API | AC-04, BR-24 | Requester requests Internal Notes | 403, empty body, no note content leaked | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-09 | API | AC-03, BR-03 | Client-supplied requesterId ignored | Authenticated identity determines ownership regardless of body/query override | `server/tests/lab-02/create-ticket.api.test.ts` (API-03b) | Pass |
 | API-10 | API | AC-17, BR-32 | Cross-requester ticket access | 404 (not 403), no existence confirmation | `server/tests/lab-02/ticket-detail.api.test.ts` (API-10c) | Pass |
 | API-10d | API | FR-07 | Unauthenticated access to every Requester route | 401 on GET/POST/PATCH tickets, GET/POST/DELETE attachments, the download route, categories, and systems — **corrected in review of PR #65**: the original claim listed categories/systems but not PATCH, attachments, download, or systems specifically, and no systems test file existed at all | `server/tests/lab-01/{categories,systems}.test.ts`, `server/tests/lab-02/{create-ticket,my-tickets,ticket-detail}.api.test.ts` | Pass |
 | API-10e | API | §5.1, §9 | Attachment download endpoint (new in I-4 — did not exist in Lab 2) | Owner downloads 200; non-owner 404; soft-removed attachment 410 | `server/tests/lab-02/ticket-detail.api.test.ts` (API-12b, API-13) | Pass |
 | API-10f | Security | BR-32 | POST/DELETE attachment ownership (added in review of PR #65 — the ownership fix itself had no non-owner test on these two routes, only GET/download) | Non-owner POST returns 404 and writes no file to disk; non-owner DELETE returns 404 | `server/tests/lab-02/ticket-detail.api.test.ts` (API-12c, API-13a) | Pass |
 | API-11 | API | FR-07 | Unauthenticated access to any protected route | 401 across the route table | `server/tests/lab-03/authorization.api.test.ts` | Pass |
-| API-12 | API | §6 matrix | Full role × endpoint authorization grid | Prints and asserts the matrix in `specification.md` §6 in one run | `server/tests/lab-03/authorization.api.test.ts` | *(grows incrementally — full grid needs I-4/I-6/I-7/I-8 routes to exist; role-gate mechanism itself is covered now by API-21..23 below)* |
+| API-12 | API | §6 matrix | Full role × endpoint authorization grid | Prints and asserts the matrix in `specification.md` §6 in one run | `server/tests/lab-03/authorization.api.test.ts` | Pass *(now covers I-4/I-6/I-7 routes; still grows for I-8's admin routes)* |
 | AUTHZ-01 | API | §6 matrix | requireRole middleware — permitted/rejected role behavior | Permitted role passes through; other role → 403 FORBIDDEN; no auth → 401 | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | AUTHZ-02 | Security | BR-07, FR-07 | Deactivation takes effect on next request, not at token expiry | A live session is rejected 403 the instant the account is deactivated | `server/tests/lab-03/authorization.api.test.ts` | Pass |
 | API-13 | API | AC-18 | Staff queue — search/filter/sort/pagination | Correct result sets per query; invalid param → 400 naming the field | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
 | API-13n | API | AC-18 (added in review of PR #67 — item 3: `page` had no upper bound, only `pageSize` did) | Staff queue — huge page number | An absurdly large `page` (e.g. `99999999999999999999`) returns 400 naming `page`, not an unhandled 500 from an oversized Prisma `skip` | `server/tests/lab-03/staff-queue.api.test.ts` (API-13n) | Pass |
 | API-14 | API | FR-14 | Staff queue — role restriction | Requester → 403; IT Staff/Admin → 200 | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
 | API-28 | API | AC-18 (added in review of PR #67 — item 2: no endpoint listed staff for the Owner filter picker) | `GET /api/staff/members` roster | Returns active IT_STAFF/ADMINISTRATOR users as `[{ id, name }]` ordered by name; Requester → 403; unauthenticated → 401 | `server/tests/lab-03/staff-queue.api.test.ts` | Pass |
-| API-15 | API | AC-08, BR-13, BR-14 | Claim/reassign ownership | Owner set correctly; rejects an inactive or Requester-role ownerId | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |
-| API-16 | API | BR-16 | Set IT Priority | Updates independently of Requested Priority; role-restricted | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |
-| API-17 | API | AC-09, BR-17, BR-19 | Status transition enforcement | Legal transition succeeds; illegal → 409 with permitted set; IN_PROGRESS blocked while unassigned | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | |
+| API-15 | API | AC-08, BR-13, BR-14 | Claim/reassign ownership | Owner set correctly; rejects an inactive or Requester-role ownerId | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-16 | API | BR-16 | Set IT Priority | Updates independently of Requested Priority; role-restricted | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-17 | API | AC-09, BR-17, BR-19 | Status transition enforcement | Legal transition succeeds; illegal → 409 with permitted set; IN_PROGRESS blocked while unassigned | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
+| API-17b | API | BR-17 (added in review of PR #68 — item 1: `GET`'s `permittedStatusTransitions` did not apply the BR-17 filter that `PATCH /status` enforces, so an unassigned ticket's response could offer `IN_PROGRESS` as permitted even though applying it always 409'd) | `GET /api/staff/tickets/:id` — `permittedStatusTransitions` BR-17 filter | Excludes `IN_PROGRESS` for an unassigned ticket; includes it once the ticket has an owner | `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
 | API-18 | API | AC-10, BR-05 | Requester resolution signal | Sets flag + auto-comment; status unchanged; Requester cannot set Resolved/Closed directly; blocked (409) once already terminal; 404 for non-owner | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-18f | API | BR-05 | Resolution-signal idempotency (added in review of PR #66 — no test called the route twice on the same still-open ticket) | A second call on the same open ticket returns 409, does not overwrite the timestamp, and does not create a duplicate comment | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-19 | API | BR-04, BR-21, BR-22, BR-23, BR-32 | Public Comments CRUD (create/list only) | Append-only (no PATCH/DELETE route); author/timestamp server-set; rejects blank/oversize content; 404 for non-owning Requester; 401 unauthenticated | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
-| API-20 | API | BR-04, BR-21 | Internal Notes CRUD (create/list only) | Staff/Admin only; append-only; same validation as comments | `server/tests/lab-03/comments-notes.api.test.ts` | |
+| API-20 | API | BR-04, BR-21 | Internal Notes CRUD (create/list only) | Staff/Admin only; append-only; same validation as comments | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
+| SEC-01 | Security | (found capturing I-7's Part 7 curl evidence, not from a written requirement — every `include: { requester: true }` fetched the full `User` row, including `passwordHash`, into the ticket response; three Requester-facing routes since I-2, plus the new I-7 staff-detail route) | No ticket response ever includes `passwordHash` | `res.body.requester.passwordHash` is `undefined` and the raw JSON contains no `passwordHash` string, for both the Requester's own ticket detail and the staff detail route | `server/tests/lab-02/ticket-detail.api.test.ts`, `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
 | API-21 | API | FR-20 | Admin user list — search/role filter | Correct filtering; non-Admin → 403 | `server/tests/lab-03/users-admin.api.test.ts` | |
 | API-22 | API | AC-11, BR-26 | Create user — duplicate email | 409, case-insensitive match, no user created | `server/tests/lab-03/users-admin.api.test.ts` | |
 | API-23 | API | FR-24 | Create user — invalid role | 400 | `server/tests/lab-03/users-admin.api.test.ts` | |
@@ -81,10 +84,10 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-03 | UI Component | FR-14 | Staff Queue rendering | Renders rows with correct badges; empty and no-results states render correctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
 | UI-04 | UI Style | §1 (ui-spec) | Status/role badge colors | Correct token applied per status/role value; owner name vs. Unassigned pill | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
 | UI-05 | Responsive | §9 (ui-spec) | Queue table → card collapse | Card layout markup present alongside the desktop table (Bootstrap breakpoint classes; jsdom does not evaluate CSS media queries, so this asserts markup, not computed layout) | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
-| UI-03e | UI Component | FR-14 (added in review of PR #67 — item 1: "Open" navigated to a route App.tsx never defines, and no test caught it) | Queue "Open" action | Clicking a row's Open button opens a read-only modal populated with that row's already-fetched data (summary, description, category, priorities, status, owner, requester, dates); Close dismisses it | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-1) | Pass |
+| UI-03e | UI Component | FR-14 (added in review of PR #67 — item 1: "Open" navigated to a route App.tsx never defines, and no test caught it; **superseded in I-7**, which built that route; wording corrected in review of PR #68 — item 3: the I-6 modal was fully deleted, not preserved) | Queue "Open" action | Clicking a row's Open button navigates to the real `/staff/tickets/:id` Staff Ticket Detail screen (I-7). The I-6 read-only modal (`TicketDetailModal`) no longer exists at all; `onOpenTicket` is a bare optional callback that receives the clicked ticket id and renders nothing itself — a caller that passes it must build its own UI | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-1) | Pass |
 | UI-03f | UI Component | AC-18 (added in review of PR #67 — item 2: Owner filter only offered All/Unassigned) | Queue Owner picker | Picker is populated from `GET /api/staff/members`; selecting a specific staff member sends the matching `ownerId` query param | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-2) | Pass |
-| UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | |
-| UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | |
+| UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
+| UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | |
 | UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | |
 
@@ -98,6 +101,27 @@ Security/Authorization · Migration/Regression · End-to-End.
 | E2E-04 | E2E | FR-20–FR-23 | Full admin workflow | Create user → set initial password → that user's forced change at next login | `e2e/lab-03/user-administration.spec.ts` | |
 
 ---
+
+## Part 7 Direct API Authorization Evidence
+
+Cookie-jar `curl` transcripts (D-01: the session is an httpOnly cookie, so
+there is no bearer token to paste) captured 2026-09-17 against a running
+local server and the real dev database, per `sprint-plan.md` §6:
+`artifacts/lab-03/curl-transcripts-i7.txt`. Covers all six required
+scenarios (Requester → internal notes 403 with no note content; Requester →
+staff queue 403; Requester → another Requester's ticket 404 masking per
+BR-32; IT Staff → admin users; unauthenticated → 401;
+`mustChangePassword` user → 403), plus a bonus I-7 positive-path transcript
+(claim → illegal transition 409 with permitted set).
+
+The IT-Staff-→-admin-users scenario currently returns a route-not-found 404
+rather than a role-based 403, because `/api/admin/users` is I-8's scope and
+has not been built yet; this is recorded honestly in the transcript itself
+rather than faked, and will be re-captured with a real 403 once I-8 lands.
+
+Capturing this transcript is also what surfaced SEC-01 above (the
+`passwordHash` leak) — the transcript file documents the finding, the fix,
+and a re-run of the same request confirming it.
 
 ## Screenshot / Visual Evidence Traceability
 

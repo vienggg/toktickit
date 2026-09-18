@@ -9,6 +9,7 @@ import { CreateTicket } from './components/CreateTicket';
 import { MyTickets } from './components/MyTickets';
 import { TicketDetail } from './components/TicketDetail';
 import { StaffTicketQueue } from './components/StaffTicketQueue';
+import { StaffTicketDetail } from './components/StaffTicketDetail';
 
 function RequesterWorkspace() {
   const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
@@ -75,6 +76,16 @@ export default function App() {
               <RequireAuth>
                 <RequireRole roles={['IT_STAFF', 'ADMINISTRATOR']}>
                   <StaffTicketQueue />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/staff/tickets/:id"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['IT_STAFF', 'ADMINISTRATOR']}>
+                  <StaffTicketDetail />
                 </RequireRole>
               </RequireAuth>
             }

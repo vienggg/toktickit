@@ -53,6 +53,13 @@ describe('Ticket Detail, Attachment Lifecycle, and In-Place Edit (API-10..13)', 
     expect(res.body).toHaveProperty('attachments');
   });
 
+  it('SEC-01: never includes the requester\'s passwordHash (found while capturing I-7\'s Part 7 curl evidence — `include: { requester: true }` was fetching the full User row, including its own hash, into this response)', async () => {
+    const res = await agent.get(`/api/tickets/${sampleTicketId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.requester.passwordHash).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toMatch(/passwordHash/i);
+  });
+
   it('API-10b: an unauthenticated request is rejected with 401', async () => {
     const res = await request(app).get(`/api/tickets/${sampleTicketId}`);
     expect(res.status).toBe(401);

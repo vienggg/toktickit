@@ -20,7 +20,8 @@
 | [#64](https://github.com/vienggg/toktickit/pull/64) | feat(lab3): authentication foundation — login, logout, me, change-password | `feature/lab3-auth-foundation` | `lab3-staging` | Approved & Merged |
 | [#65](https://github.com/vienggg/toktickit/pull/65) | feat(lab3): auth UI, routing, and Requester regression | `feature/lab3-auth-shell-and-regression` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#66](https://github.com/vienggg/toktickit/pull/66) | feat(lab3): Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
-| [#67](https://github.com/vienggg/toktickit/pull/67) | feat(lab3): IT Staff Ticket Queue | `feature/lab3-staff-queue` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
+| [#67](https://github.com/vienggg/toktickit/pull/67) | feat(lab3): IT Staff Ticket Queue | `feature/lab3-staff-queue` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
+| [#68](https://github.com/vienggg/toktickit/pull/68) | feat(lab3): IT Staff Ticket Detail | `feature/lab3-staff-ticket-detail` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
@@ -183,6 +184,79 @@ what this document says.
 > `fetchAuthorizedTicketOr404` core-plus-thin-call-sites shape from the
 > last two reviews. 103 server tests (+4 new) and 27 client tests (+2 new)
 > pass.
+
+#### PR #68: IT Staff Ticket Detail — Changes Requested (@projectnewy, 2026-09-18)
+
+> **Reviewer Feedback:** Ten findings, two blocking. Also called out several
+> things done well: the status-transition matrix matched §6.5 exactly, the
+> `SAFE_REQUESTER_SELECT` passwordHash fix (from this same PR) was checked
+> against every `requester:` include and found complete, ownership
+> assignment correctly validated the live active-staff roster, and Internal
+> Notes' 403 masking correctly ran the role check before the ticket lookup.
+> Blocking: (1) `GET /api/staff/tickets/:id`'s `permittedStatusTransitions`
+> did not apply the same BR-17 filter (`IN_PROGRESS` blocked while
+> unassigned) that `PATCH /status` separately enforced — reproducible in
+> the PR's own curl evidence (ticket 232, unassigned, yet
+> `permittedStatusTransitions` included `IN_PROGRESS`) — so the client's
+> Status control could offer a choice guaranteed to 409. (2) the evidence
+> transcript (`artifacts/lab-03/curl-transcripts-i7.txt`) committed a real
+> bcrypt hash for the regression-suite account, permanently in git history
+> even after the runtime leak was fixed. Non-blocking: (3) comments/docs/a
+> test title inaccurately claimed the I-6 read-only modal "remains
+> available" via `onOpenTicket` after it had actually been deleted; (4)
+> owner/IT-Priority/status PATCH handlers wrote then re-fetched the ticket
+> with a second query instead of using `update()`'s own `include`; (5) the
+> Public Comments panel was copy-pasted into `StaffTicketDetail.tsx`
+> instead of shared, and had already drifted (always showing the role
+> badge, unlike the Requester-side suppression for REQUESTER authors); (6)
+> `formatDate` was reimplemented locally instead of reusing the shared one,
+> producing a different date format; (7) `GET /api/staff/members` was
+> fetched independently by both the Queue and Detail screens; (8)
+> `--color-internal-note-bg` didn't match the spec's documented value; (9)
+> the three save handlers triplicated the same boilerplate; (10) the
+> `{ id, name }` owner projection was repeated ad hoc instead of a named
+> constant like `SAFE_REQUESTER_SELECT`.
+>
+> **Author Response (@vienggg):** All ten addressed. (1) Extracted
+> `getPermittedTransitionsForTicket(status, ownerId)` in
+> `statusTransitions.ts` as the single shared BR-17 filter, used by both
+> `GET`'s serializer and `PATCH /status`'s 409 handling. (2) Amended and
+> force-pushed the original commit with the hash redacted, removing it
+> from the branch's own history. (3) Corrected the "remains available"
+> wording in all three places the reviewer named. (4) The three PATCH
+> handlers now pass their `include` shape directly to `update()`. (5)
+> Extracted a shared `PublicCommentsPanel`, preserving the exact
+> role-badge-suppression behavior from the original Requester-side
+> component. (6) Switched to the shared `formatDate`. (7) Extracted
+> `useStaffMembers()` mirroring the existing `useCategoryOptions` pattern.
+> (8) Corrected the CSS variable to the spec's documented `#FDF4E7`. (9)
+> Extracted `useSavingAction()` for the shared save/error/success flow.
+> (10) Added a named `STAFF_OWNER_SELECT` constant. 218 server tests (+5
+> new) and 39 client tests pass.
+>
+> **Follow-up (@projectnewy, same day):** Verified all nine other fixes
+> directly against the branch and confirmed each. Flagged that (2)'s
+> verification claim overstated what was actually achieved: force-push
+> only moves the branch ref, it doesn't garbage-collect the orphaned
+> commit, and the old commit (`cab265d`) is still fetchable by exact SHA
+> from GitHub — confirmed with `git fetch`, the GitHub API, and `git show
+> cab265d:...`, which all still return the real hash. Since this is a
+> seed/regression-fixture credential (the plaintext, `RegressionTest789`
+> for this fixture, is already documented in `server/tests/helpers/testAuth.ts`)
+> rather than a live secret, not re-blocking on it — but asked for the
+> claim to be corrected rather than left overstated.
+>
+> **Author Response (@vienggg):** Agreed and corrected. Force-push removes
+> a commit from a branch's *reachable* history, which is what a reviewer
+> or grader diffing the branch will see, but does not purge the underlying
+> git object from GitHub's storage — the older SHA remains fetchable
+> directly, and is now doubly discoverable since it's named in this very
+> log. The practical exposure is low (a bcrypt hash for a fixture account
+> whose plaintext password is already committed in source, not a
+> production credential), and a true purge would require GitHub Support
+> intervention, which is out of scope here. Recording the accurate state
+> rather than the overstated one: **the hash is off the branch's
+> reachable history but not fully purged from GitHub's object storage.**
 
 ---
 

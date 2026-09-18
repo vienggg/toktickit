@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import React from 'react';
 import { AuthProvider } from '../../src/context/AuthContext';
 import { StaffTicketQueue } from '../../src/components/StaffTicketQueue';
@@ -103,6 +103,22 @@ function renderQueue() {
   );
 }
 
+// Renders the Queue alongside a stand-in destination route, so a click that
+// navigates to /staff/tickets/:id (I-7's real detail screen) can be
+// observed without pulling in the full StaffTicketDetail component here.
+function renderQueueWithDetailRoute() {
+  return render(
+    <MemoryRouter initialEntries={['/staff/queue']}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/staff/queue" element={<StaffTicketQueue />} />
+          <Route path="/staff/tickets/:id" element={<div data-testid="detail-route-stub">Detail route reached</div>} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
 describe('IT Staff Ticket Queue (UI-03, UI-04, UI-05)', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -161,26 +177,36 @@ describe('IT Staff Ticket Queue (UI-03, UI-04, UI-05)', () => {
   });
 
   // Added in review of PR #67 (item 1): the "Open" button previously
-  // navigated to a route App.tsx never defines, silently falling through
-  // to the Requester workspace. No test caught it because nothing
-  // exercised the click. This asserts the default behavior instead opens
-  // a read-only modal populated with the row's already-fetched data.
-  it('item-1: clicking a row\'s Open button opens a read-only modal with that ticket\'s data', async () => {
-    renderQueue();
+  // navigated to a route App.tsx never defined, silently falling through
+  // to the Requester workspace. I-7 (Issue #56) has since built that real
+  // route/screen (StaffTicketDetail), so the default action now navigates
+  // there instead of opening the read-only modal that was I-6's stopgap.
+  it("item-1 (superseded by I-7): clicking a row's Open button navigates to the real Staff Ticket Detail route", async () => {
+    renderQueueWithDetailRoute();
     await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
 
     const openButtons = screen.getAllByRole('button', { name: 'Open' });
     fireEvent.click(openButtons[0]);
 
-    await waitFor(() => expect(screen.getByTestId('ticket-detail-modal')).toBeInTheDocument());
-    const modal = screen.getByTestId('ticket-detail-modal');
-    expect(modal).toHaveTextContent('Printer offline on 3rd floor');
-    expect(modal).toHaveTextContent('The printer will not respond to print jobs.');
-    expect(modal).toHaveTextContent('Jennifer Anderson');
-    expect(modal).toHaveTextContent('Hardware');
+    await waitFor(() => expect(screen.getByTestId('detail-route-stub')).toBeInTheDocument());
+  });
 
-    fireEvent.click(screen.getByLabelText('Close'));
-    await waitFor(() => expect(screen.queryByTestId('ticket-detail-modal')).not.toBeInTheDocument());
+  it('onOpenTicket, when passed, fires with the clicked ticket id instead of navigating (it is a bare callback, not a preserved modal)', async () => {
+    const onOpenTicket = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/staff/queue']}>
+        <AuthProvider>
+          <StaffTicketQueue onOpenTicket={onOpenTicket} />
+        </AuthProvider>
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    const openButtons = screen.getAllByRole('button', { name: 'Open' });
+    fireEvent.click(openButtons[0]);
+
+    expect(onOpenTicket).toHaveBeenCalledWith(baseTicket.id);
+    expect(screen.queryByTestId('ticket-detail-modal')).not.toBeInTheDocument();
   });
 
   // Added in review of PR #67 (item 2): the Owner filter previously only
