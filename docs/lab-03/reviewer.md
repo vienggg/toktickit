@@ -22,7 +22,8 @@
 | [#66](https://github.com/vienggg/toktickit/pull/66) | feat(lab3): Requester Public Comments and resolution signal | `feature/lab3-requester-comments` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#67](https://github.com/vienggg/toktickit/pull/67) | feat(lab3): IT Staff Ticket Queue | `feature/lab3-staff-queue` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#68](https://github.com/vienggg/toktickit/pull/68) | feat(lab3): IT Staff Ticket Detail | `feature/lab3-staff-ticket-detail` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
-| [#69](https://github.com/vienggg/toktickit/pull/69) | feat(lab3): Administrator User Management | `feature/lab3-user-administration` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
+| [#69](https://github.com/vienggg/toktickit/pull/69) | feat(lab3): Administrator User Management | `feature/lab3-user-administration` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
+| [#70](https://github.com/vienggg/toktickit/pull/70) | feat(lab3): E2E specs, full screenshot manifest, visual inspection | `feature/lab3-e2e-and-visual` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
@@ -316,6 +317,58 @@ what this document says.
 > asserting `RequireRole` redirects IT_STAFF/Requester away from
 > `/admin/users`. 251 server tests (+3 new) and 52 client tests (+2 new)
 > pass.
+
+#### PR #70: E2E specs, full screenshot manifest, visual inspection — Changes Requested (@projectnewy, 2026-09-18)
+
+> **Reviewer Feedback:** Six findings, one blocking. Opened by noting this
+> PR was "a real step up in rigor" from the PR #68 incident — the
+> three honestly-unchecked checklist items and the `ai-use.md`
+> process-deviation admission were checked against the actual code and
+> both held up exactly as described, and the `login()` helper's ARIA-role
+> fix was confirmed as a genuine fix rather than a workaround. Blocking:
+> (1) every new spec authenticates as a `regression-suite-*` fixture
+> account that is only ever created as a lazy side effect of the server's
+> own vitest suite touching `testAuth.ts` — absent from `seed.ts`, with no
+> `globalSetup` in `playwright.config.ts` either — so the "13/13 passing"
+> claim was not reproducible from a genuinely fresh database; it only
+> worked because the local dev DB had already accumulated those rows from
+> a different test suite. Worth fixing: (2) the Claim-ticket step's
+> `isVisible().catch(() => false)` guard meant a future regression hiding
+> the Claim button entirely would report green instead of failing, since
+> the following assertion only checked the button was gone, not that
+> claiming actually happened; (3) `shoot(..., "all")` left the page stuck
+> at mobile viewport afterward, worked around with three scattered ad hoc
+> resets across two spec files while a third spec never got the same fix;
+> (4) a checked-off checklist item described a UI state (Owner as
+> "static text" vs. a select) that doesn't exist in the actual component.
+> Minor: (5) a checked-off item claimed more than its backing test
+> verified (that status badges are drawn from a declared 7-color scale,
+> not just that they differ from priority badges); (6) the
+> forbidden/not-found checklist item was only tested for two forbidden
+> scenarios, never a genuine not-found ticket ID.
+>
+> **Author Response (@vienggg):** All six addressed. (1) Added
+> `e2e/lab-03/global-setup.ts`, wired via `playwright.config.ts`'s
+> `globalSetup`, running the same `ensureRegression*()` upserts directly
+> before any spec, independent of any other suite ever having run —
+> required moving `testAuth.ts`'s `app` import to a lazy dynamic import
+> since `app.ts`'s `import.meta.url` isn't valid under Playwright's module
+> resolution for this repo. Verified for real by corrupting the three
+> fixture rows via Prisma and re-running the suite to confirm global setup
+> repairs them before the first login. (2) The Claim step now asserts the
+> button is visible before clicking and asserts the owner value actually
+> changed afterward. (3) Fixed the viewport-stickiness once in `shoot()`
+> itself (captures and restores the pre-call viewport), removed the three
+> ad hoc resets. (4) Corrected the checklist wording — Owner is always one
+> `<select>` with "Unassigned" as one of its own options; left honestly
+> unchecked rather than checked against a state that doesn't exist. (5)
+> Narrowed the claim to match what's actually tested, and flagged the
+> underlying gap (the 7-color scale isn't wired into any CSS yet) as a
+> separate follow-up rather than fixing it here or leaving the checkmark
+> inflated. (6) Added a genuine not-found-ticket test —
+> `StaffTicketDetail.tsx` already handled the case correctly; only the
+> test coverage was missing. 14/14 Playwright tests pass (13 original + 1
+> new).
 
 ---
 
