@@ -67,36 +67,27 @@ $ curl -c jar.txt -X POST localhost:3000/api/auth/login -d '{"email":"regression
 (logged in as IT_STAFF regression-suite-staff@toktick.internal)
 
 $ curl -b jar.txt -i localhost:3000/api/admin/users
-HTTP/1.1 404 Not Found
+HTTP/1.1 403 Forbidden
 X-Powered-By: Express
 Access-Control-Allow-Origin: http://localhost:5173
 Vary: Origin
 Access-Control-Allow-Credentials: true
-Content-Security-Policy: default-src 'none'
-X-Content-Type-Options: nosniff
-Content-Type: text/html; charset=utf-8
-Content-Length: 154
-Date: Thu, 17 Sep 2026 10:54:30 GMT
+Content-Type: application/json; charset=utf-8
+Content-Length: 93
+ETag: W/"5d-dhyf7VaPnYE+oUZ7Wz4c7KZPZDY"
+Date: Fri, 18 Sep 2026 09:04:46 GMT
 Connection: keep-alive
 Keep-Alive: timeout=5
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Error</title>
-</head>
-<body>
-<pre>Cannot GET /api/admin/users</pre>
-</body>
-</html>
+{"error":{"code":"FORBIDDEN","message":"You do not have permission to perform this action."}}
 
-NOTE: this returns 404 ("Cannot GET"), not 403, because /api/admin/users is
-I-8's scope (Administrator User Management) and has not been built yet —
-this transcript is captured alongside I-7 per the sprint plan's wording, but
-I-8 has not landed. This scenario will be re-captured with a real 403 once
-I-8's routes exist, and this note will be removed at that point. Recorded
-honestly now rather than faked or silently omitted.
+NOTE (re-captured 2026-09-18, review of PR #69 item 2): this scenario
+previously showed a route-not-found 404 ("Cannot GET /api/admin/users")
+with a note deferring re-capture "once I-8's routes exist" — I-8
+(Administrator User Management) has since landed, and this transcript now
+shows the real role-based 403 the scenario was always meant to
+demonstrate: IT_STAFF is authenticated but not permitted to access
+Administrator-only routes.
 
 
 ======================================================================

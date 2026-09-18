@@ -65,13 +65,16 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-19 | API | BR-04, BR-21, BR-22, BR-23, BR-32 | Public Comments CRUD (create/list only) | Append-only (no PATCH/DELETE route); author/timestamp server-set; rejects blank/oversize content; 404 for non-owning Requester; 401 unauthenticated | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | API-20 | API | BR-04, BR-21 | Internal Notes CRUD (create/list only) | Staff/Admin only; append-only; same validation as comments | `server/tests/lab-03/comments-notes.api.test.ts` | Pass |
 | SEC-01 | Security | (found capturing I-7's Part 7 curl evidence, not from a written requirement — every `include: { requester: true }` fetched the full `User` row, including `passwordHash`, into the ticket response; three Requester-facing routes since I-2, plus the new I-7 staff-detail route) | No ticket response ever includes `passwordHash` | `res.body.requester.passwordHash` is `undefined` and the raw JSON contains no `passwordHash` string, for both the Requester's own ticket detail and the staff detail route | `server/tests/lab-02/ticket-detail.api.test.ts`, `server/tests/lab-03/staff-ticket-detail.api.test.ts` | Pass |
-| API-21 | API | FR-20 | Admin user list — search/role filter | Correct filtering; non-Admin → 403 | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-22 | API | AC-11, BR-26 | Create user — duplicate email | 409, case-insensitive match, no user created | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-23 | API | FR-24 | Create user — invalid role | 400 | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-24 | API | FR-22 | Edit user — basic fields | Name/email/role/isActive update correctly | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-25 | API | AC-14, FR-23 | Set new initial password | mustChangePassword forced true; that user's next login requires change | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-26 | API | AC-12, BR-27 | Self-deactivation blocked | Admin cannot deactivate/demote own account | `server/tests/lab-03/users-admin.api.test.ts` | |
-| API-27 | API | AC-13, BR-28 | Last-Administrator protection | Deactivating/demoting the last active Admin rejected; a second active Admin may be deactivated | `server/tests/lab-03/users-admin.api.test.ts` | |
+| API-21 | API | FR-20 | Admin user list — search/role filter | Correct filtering; non-Admin → 403 | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-22 | API | AC-11, BR-26 | Create user — duplicate email | 409, case-insensitive match, no user created | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-23 | API | FR-24 | Create user — invalid role | 400 | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-24 | API | FR-22 | Edit user — basic fields | Name/email/role/isActive update correctly | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-25 | API | AC-14, FR-23 | Set new initial password | mustChangePassword forced true; that user's next login requires change | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-26 | API | AC-12, BR-27 | Self-deactivation blocked | Admin cannot deactivate/demote own account | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-27 | API | AC-13, BR-28 | Last-Administrator protection | Deactivating/demoting the last active Admin rejected; a second active Admin may be deactivated | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-29 | API | AC-13, BR-28 (added in review of PR #69 — item 1: TOCTOU race in the last-Administrator count-then-write) | Last-Administrator protection under real concurrency | Two concurrent PATCHes, each deactivating the other of exactly two active Administrators, via `Promise.all`: exactly one succeeds (200), the other is rejected (403 LAST_ADMINISTRATOR), and a fresh DB count immediately after confirms at least one active Administrator remains | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-30 | API | AC-12, BR-27 vs BR-26 (added in review of PR #69 — item 4: ordering) | Self-modification check precedes duplicate-email check | A self-deactivation attempt whose body also collides on another user's email returns 403 SELF_MODIFICATION_BLOCKED, not 409 DUPLICATE_EMAIL | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
+| API-31 | API | BR-26 (added in review of PR #69 — item 5: app-level email pre-check races the DB unique constraint) | Duplicate-email race on create | Two concurrent `POST /api/admin/users` with the same email via `Promise.all`: one succeeds (201), the other returns 409 DUPLICATE_EMAIL (not a 500), and only one row is created | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | REGR-01 | Migration/Regression | BR-30, BR-31, AC-16 | Row-count and FK integrity before/after migration | Category/RequesterUser→User/RelatedSystem/Ticket/Attachment counts unchanged; every requesterId still resolves | `server/tests/lab-03/migration-regression.api.test.ts` | |
 | REGR-02 | Migration/Regression | FR-10 | All Lab 1/2 endpoints still function under cookie auth | Every Lab 2 API test passes after rewriting from `?requesterId=` to session auth | `server/tests/lab-03/migration-regression.api.test.ts` | |
 
@@ -88,8 +91,9 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-03f | UI Component | AC-18 (added in review of PR #67 — item 2: Owner filter only offered All/Unassigned) | Queue Owner picker | Picker is populated from `GET /api/staff/members`; selecting a specific staff member sends the matching `ownerId` query param | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-2) | Pass |
 | UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
-| UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | |
-| UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | |
+| UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| UI-10 | UI Component | FR-20 (added in review of PR #69 — item 9: no client test exercised RequireRole on a route this sensitive) | RequireRole guard on `/admin/users` | IT_STAFF and REQUESTER users are redirected away from `/admin/users` instead of it rendering; an ADMINISTRATOR user renders it normally | `client/tests/lab-03/ProtectedRoute.test.tsx` | Pass |
 
 ## End-to-End Tests — `e2e/lab-03/` (Playwright)
 
@@ -114,10 +118,11 @@ BR-32; IT Staff → admin users; unauthenticated → 401;
 `mustChangePassword` user → 403), plus a bonus I-7 positive-path transcript
 (claim → illegal transition 409 with permitted set).
 
-The IT-Staff-→-admin-users scenario currently returns a route-not-found 404
-rather than a role-based 403, because `/api/admin/users` is I-8's scope and
-has not been built yet; this is recorded honestly in the transcript itself
-rather than faked, and will be re-captured with a real 403 once I-8 lands.
+The IT-Staff-→-admin-users scenario was originally captured as a
+route-not-found 404 (before I-8 existed), with a note deferring re-capture.
+I-8 (Administrator User Management) has since landed on this branch, and
+the transcript was re-captured against the real routes: it now shows the
+role-based 403 the scenario was always meant to demonstrate.
 
 Capturing this transcript is also what surfaced SEC-01 above (the
 `passwordHash` leak) — the transcript file documents the finding, the fix,
