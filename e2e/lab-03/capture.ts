@@ -36,8 +36,16 @@ export type ScreenshotFolder =
 export async function login(page: Page, email: string, password: string) {
   await page.goto("/login");
   await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/password/i).fill(password);
+  // getByLabel(/password/i) alone also matches the "Show password" toggle
+  // button (its aria-label contains "password"); the textbox role narrows
+  // it to the actual <input>.
+  await page.getByRole("textbox", { name: /password/i }).fill(password);
   await page.getByRole("button", { name: /log in|sign in/i }).click();
+  // The click triggers an async POST /api/auth/login followed by a client-
+  // side redirect; without waiting for that redirect, an immediate
+  // page.goto() elsewhere in a spec can race ahead of it and land back on
+  // /login. Wait for the URL to actually leave /login before returning.
+  await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 15_000 });
 }
 
 /**
@@ -55,10 +63,24 @@ export async function shoot(
 
   const targets = viewport === "all" ? (Object.keys(VIEWPORTS) as (keyof typeof VIEWPORTS)[]) : [viewport];
 
+  // Capturing "all" iterates desktop -> tablet -> mobile and, without this,
+  // left the page stuck at the last (mobile, 375x812) viewport afterward —
+  // an undocumented side effect that every subsequent interaction in the
+  // calling spec then silently ran under. Callers worked around it with
+  // hand-rolled `page.setViewportSize(...)` resets scattered after each
+  // "all" capture (review of PR #70, item 3); fixing it once here, by
+  // restoring whatever viewport the page was actually at before this call,
+  // removes the need for every one of those call sites.
+  const originalViewport = page.viewportSize();
+
   for (const vp of targets) {
     await page.setViewportSize(VIEWPORTS[vp]);
     await page.waitForLoadState("networkidle");
     const file = path.join(dir, `${figure}@${vp}.png`);
     await page.screenshot({ path: file, fullPage: true });
+  }
+
+  if (viewport === "all" && originalViewport) {
+    await page.setViewportSize(originalViewport);
   }
 }

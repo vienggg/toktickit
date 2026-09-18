@@ -1,8 +1,19 @@
 import request from "supertest";
-import { app } from "../../src/app.js";
 import { getPrisma } from "../../src/prisma.js";
 import { hashPassword } from "../../src/utils/password.js";
 import { Role } from "@prisma/client";
+
+// `app` is imported lazily (inside each loginAsRegression*() below) rather
+// than at module top level. app.ts uses `import.meta.url` (for its ESM
+// __dirname equivalent), which is fine under Vitest's real ESM runtime but
+// breaks when this file is imported from Playwright's own TS transform
+// (e2e/lab-03/global-setup.ts, added in review of PR #70, item 1) — that
+// loader runs this repo's TS as CommonJS since the root package.json has no
+// "type": "module", and `import.meta` throws a SyntaxError there. Global
+// setup only ever calls the ensureRegression*() functions below, never the
+// loginAsRegression*() ones, so keeping the `app` import out of this file's
+// top level lets global setup import this module without ever touching
+// app.ts at all.
 
 // Shared test-fixture accounts for the Lab 1/2 regression suites, which
 // need a real, logged-in, mustChangePassword=false Requester to exercise
@@ -33,6 +44,7 @@ export async function ensureRegressionRequester() {
 /** Returns a supertest agent already logged in as the regression requester. */
 export async function loginAsRegressionRequester() {
   await ensureRegressionRequester();
+  const { app } = await import("../../src/app.js");
   const agent = request.agent(app);
   const res = await agent.post("/api/auth/login").send({
     email: REGRESSION_REQUESTER_EMAIL,
@@ -77,6 +89,7 @@ export async function ensureRegressionOtherRequester() {
 /** Returns a supertest agent already logged in as the "someone else" fixture requester. */
 export async function loginAsRegressionOtherRequester() {
   await ensureRegressionOtherRequester();
+  const { app } = await import("../../src/app.js");
   const agent = request.agent(app);
   const res = await agent.post("/api/auth/login").send({
     email: REGRESSION_OTHER_REQUESTER_EMAIL,
@@ -115,6 +128,7 @@ export async function ensureRegressionStaff() {
 /** Returns a supertest agent already logged in as the regression IT Staff fixture. */
 export async function loginAsRegressionStaff() {
   await ensureRegressionStaff();
+  const { app } = await import("../../src/app.js");
   const agent = request.agent(app);
   const res = await agent.post("/api/auth/login").send({
     email: REGRESSION_STAFF_EMAIL,
@@ -152,6 +166,7 @@ export async function ensureRegressionAdmin() {
 /** Returns a supertest agent already logged in as the regression Administrator fixture. */
 export async function loginAsRegressionAdmin() {
   await ensureRegressionAdmin();
+  const { app } = await import("../../src/app.js");
   const agent = request.agent(app);
   const res = await agent.post("/api/auth/login").send({
     email: REGRESSION_ADMIN_EMAIL,

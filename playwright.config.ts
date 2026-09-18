@@ -8,6 +8,12 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./e2e",
+  // Provisions the regression-suite-{requester,staff,admin}@toktick.internal
+  // fixture accounts every e2e/lab-03 spec logs in as, directly via Prisma,
+  // so this suite never silently depends on the server's own vitest suite
+  // having run first against the same database (review of PR #70, item 1).
+  // See e2e/lab-03/global-setup.ts for the full rationale.
+  globalSetup: "./e2e/lab-03/global-setup.ts",
   fullyParallel: false, // seeded DB state is shared; keep specs serialized
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
