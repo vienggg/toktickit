@@ -56,7 +56,8 @@ export async function shoot(
   page: Page,
   folder: ScreenshotFolder,
   figure: string,
-  viewport: keyof typeof VIEWPORTS | "all" = "desktop"
+  viewport: keyof typeof VIEWPORTS | "all" = "desktop",
+  options: { fullPage?: boolean } = {}
 ) {
   const dir = path.join(SCREENSHOT_ROOT, folder);
   fs.mkdirSync(dir, { recursive: true });
@@ -77,7 +78,7 @@ export async function shoot(
     await page.setViewportSize(VIEWPORTS[vp]);
     await page.waitForLoadState("networkidle");
     const file = path.join(dir, `${figure}@${vp}.png`);
-    await page.screenshot({ path: file, fullPage: true });
+    await page.screenshot({ path: file, fullPage: options.fullPage ?? true });
   }
 
   if (viewport === "all" && originalViewport) {

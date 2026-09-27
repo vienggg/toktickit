@@ -102,7 +102,6 @@ export const Login: React.FC = () => {
                   type="button"
                   className="btn btn-outline-secondary"
                   onClick={() => setShowPassword((v) => !v)}
-                  tabIndex={-1}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? '🙈' : '👁️'}

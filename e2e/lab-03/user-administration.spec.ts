@@ -13,15 +13,17 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     await page.goto("/admin/users");
     await expect(page.getByRole("heading", { name: /administrator user management/i })).toBeVisible();
 
-    // user-management folder: list view at all 3 viewports.
-    await shoot(page, "user-management", "Figure-user-list", "all");
+    // Keep these captures to the responsive viewport. The live test database
+    // retains unique E2E users across runs, so full-page captures would grow
+    // without bound and obscure the actual list layout.
+    await shoot(page, "user-management", "Figure-user-list", "all", { fullPage: false });
 
     // Create User modal. shoot(..., "all") restores whatever viewport it
     // was called at (review of PR #70, item 3), so no manual reset is
     // needed between captures any more.
     await page.getByRole("button", { name: /\+ create user/i }).click();
     await expect(page.getByRole("heading", { name: /^create user$/i })).toBeVisible();
-    await shoot(page, "user-management", "Figure-create-user-modal", "all");
+    await shoot(page, "user-management", "Figure-create-user-modal", "all", { fullPage: false });
 
     const stamp = Date.now();
     const newUserEmail = `e2e-admin-flow-${stamp}@toktick.internal`;
@@ -48,7 +50,7 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     const row = page.locator(".d-none.d-md-block tr", { hasText: newUserEmail }).first();
     await row.getByRole("button", { name: /^edit$/i }).click();
     await expect(page.getByRole("heading", { name: /^edit user$/i })).toBeVisible();
-    await shoot(page, "user-management", "Figure-edit-user-modal", "all");
+    await shoot(page, "user-management", "Figure-edit-user-modal", "all", { fullPage: false });
     // The modal footer's "Close" button and its header's little X
     // (btn-close, aria-label "Close") both match a role+name query for
     // "Close" — scope to the footer button specifically by its class.

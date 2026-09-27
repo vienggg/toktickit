@@ -94,6 +94,7 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | UI-10 | UI Component | FR-20 (added in review of PR #69 — item 9: no client test exercised RequireRole on a route this sensitive) | RequireRole guard on `/admin/users` | IT_STAFF and REQUESTER users are redirected away from `/admin/users` instead of it rendering; an ADMINISTRATOR user renders it normally | `client/tests/lab-03/ProtectedRoute.test.tsx` | Pass |
+| UI-11 | UI Resilience | Defensive rendering for API status values | Unknown status badge fallback | Known statuses use their mapped palette; unrecognized values (including prototype property names) use the neutral fallback without throwing | `client/tests/lab-03/TicketStatusBadge.test.tsx` | Pass |
 
 ## End-to-End Tests — `e2e/lab-03/` (Playwright)
 
@@ -106,10 +107,14 @@ Security/Authorization · Migration/Regression · End-to-End.
 
 `e2e/lab-03/visual-inspection.spec.ts` additionally backs the §10 Visual
 Inspection Checklist items in `ui-spec.md` with programmatic Playwright
-assertions (horizontal-overflow, badge-color, panel-background-contrast,
-editable-vs-read-only, forbidden-state, and no-clipping checks) rather than
-duplicating an E2E ID — it is supporting evidence for the checklist, not a
-new end-to-end scenario.
+assertions (responsive overflow at every breakpoint for the Staff Queue and
+across all Lab 3 screens at 375px, all status colors, role-specific navigation,
+validation placement, Owner-control distinction, panel contrast,
+editable-vs-read-only controls, keyboard sorting, a Tab-order/focus-indicator
+sweep across all authenticated role screens and responsive variants, keyboard
+attachment selection/removal-dialog behavior, forbidden states, and mobile
+clipping) rather than duplicating an E2E ID — it is supporting evidence for
+the checklist, not a new end-to-end scenario.
 
 ---
 
@@ -139,10 +144,10 @@ and a re-run of the same request confirming it.
 
 Captured via `e2e/lab-03/capture.ts` (see `sprint-plan.md` §3). Folders exactly
 as required: `artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`,
-no 5th folder. Full manifest as of the I-9 run (`npx playwright test
-e2e/lab-03/`, 13/13 passing; a 14th test — the not-found-ticket check added
-in review of PR #70, item 6 — was added afterward and does not change this
-screenshot manifest):
+no 5th folder. The latest full Lab 3 browser run passed 29/29 tests; the
+manifest below lists the checked-in evidence captures. User-management
+screenshots capture the responsive viewport rather than full-page content,
+so retained E2E fixture accounts do not make those images grow on each run:
 
 **Fixture-account dependency (review of PR #70, item 1):** every spec in
 this directory authenticates as one of the `regression-suite-{requester,

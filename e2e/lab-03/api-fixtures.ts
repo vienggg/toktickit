@@ -73,6 +73,34 @@ export async function createFreshTicketAsRequester(): Promise<{ id: number; tick
   }
 }
 
+/** Creates a fresh Requester-owned ticket with one active file for attachment-UI browser checks. */
+export async function createFreshTicketWithAttachmentAsRequester(): Promise<{
+  id: number;
+  ticketNumber: string;
+  attachmentId: number;
+}> {
+  const ticket = await createFreshTicketAsRequester();
+  const ctx = await apiLogin(REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
+  try {
+    const upload = await ctx.post(`/api/tickets/${ticket.id}/attachments`, {
+      multipart: {
+        attachments: {
+          name: "keyboard-focus-audit.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("%PDF-1.4\n% keyboard focus browser fixture\n%%EOF\n"),
+        },
+      },
+    });
+    if (upload.status() !== 201) {
+      throw new Error(`Failed to upload attachment fixture: ${upload.status()} ${await upload.text()}`);
+    }
+    const [attachment] = await upload.json();
+    return { id: ticket.id, ticketNumber: ticket.ticketNumber, attachmentId: attachment.id };
+  } finally {
+    await ctx.dispose();
+  }
+}
+
 /**
  * Creates a throwaway Requester user via the real Admin "Create User" API
  * with a timestamped, clearly test-scoped email so repeated runs never

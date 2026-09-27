@@ -6,7 +6,7 @@ Replace the Lab 2 Development Requester selector with real, session-based authen
 ---
 
 ## 2. Stakeholder Request Interpretation
-The Development Requester selector was a useful stand-in during Lab 2 but the system now needs real users. Every Requester ticket operation must be driven by an authenticated identity rather than a client-supplied identifier. IT Staff need a shared queue to find and triage work, claim or reassign ownership, set an internal IT Priority independent of what the Requester asked for, and move a Ticket through a defined status lifecycle while communicating with the Requester through Public Comments and privately through Internal Notes. Administrators need a deliberately minimal screen to create accounts, assign exactly one role, edit basic details, activate or deactivate accounts, and issue a new initial password — never to delete a user or manage anything IT Staff already own. Every protected action must be enforced by the backend; a hidden or disabled button is feedback, not a security control.
+The Development Requester selector was a useful stand-in during Lab 2 but the system now needs real users. Every Requester ticket operation must be driven by an authenticated identity rather than a client-supplied identifier. IT Staff need a shared queue to find and triage work, claim or reassign ownership, set an internal IT Priority independent of what the Requester asked for, and move a Ticket through a defined status lifecycle while communicating with the Requester through Public Comments and privately through Internal Notes. Administrators need a deliberately minimal screen to create accounts, assign exactly one role, edit basic details, activate or deactivate accounts, and issue a new initial password — never to delete a user. In this sprint, the explicit authorization matrix also grants Administrators the listed staff ticket operations; that is a project-specific authorization, not an automatic privilege of the role. Every protected action must be enforced by the backend; a hidden or disabled button is feedback, not a security control.
 
 ---
 
@@ -149,7 +149,7 @@ The Development Requester selector was a useful stand-in during Lab 2 but the sy
 | Create / edit user, set initial password | ❌ | ❌ | ✅ |
 | Activate / deactivate a user | ❌ | ❌ | ✅ (not self; not last active Admin) |
 
-For Lab 3, Administrator and IT Staff responsibilities remain conceptually separate: an Administrator does not gain IT Staff Ticket operations by role alone, and this matrix is the sole source of truth for what each role may do. Hiding a client control is a usability aid, never a substitute for the server checks in this table.
+For Lab 3, the matrix is the sole source of truth for what each role may do. It explicitly authorizes Administrators for the staff ticket operations marked ✅ above, in addition to Administrator User Management. Hiding a client control is a usability aid, never a substitute for the server checks in this table.
 
 ---
 

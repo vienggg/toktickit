@@ -4,6 +4,9 @@ import { apiFetch, parseApiError } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useStaffMembers, useSavingAction, formatDate } from '../hooks/usePaginatedFetch';
 import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
+import { Navbar } from './Navbar';
+import { TicketStatusBadge } from './TicketStatusBadge';
+import type { TicketStatusCode } from './TicketStatusBadge';
 
 interface Attachment {
   id: number;
@@ -18,15 +21,7 @@ interface Attachment {
 }
 
 type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
-type Status =
-  | 'NEW'
-  | 'OPEN'
-  | 'IN_PROGRESS'
-  | 'WAITING_FOR_REQUESTER'
-  | 'RESOLVED'
-  | 'CLOSED'
-  | 'REOPENED'
-  | 'CANCELLED';
+type Status = TicketStatusCode;
 
 interface StaffTicketDetailData {
   id: number;
@@ -65,12 +60,6 @@ interface CommentOrNote {
   createdAt: string;
 }
 
-const ROLE_LABEL: Record<string, string> = {
-  REQUESTER: 'Requester',
-  IT_STAFF: 'IT Staff',
-  ADMINISTRATOR: 'Administrator',
-};
-
 // Used only by the Internal Notes panel below now — the Public Comments
 // panel's own role-label rendering moved into PublicCommentsPanel.tsx
 // (review of PR #68, item 5).
@@ -83,14 +72,6 @@ function PriorityBadge({ priority }: { priority: string }) {
   return (
     <span className={`badge ${variant}`} data-testid="priority-badge">
       {priority}
-    </span>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <span className="badge bg-primary" data-testid="status-badge">
-      {status.replace(/_/g, ' ')}
     </span>
   );
 }
@@ -296,30 +277,38 @@ export const StaffTicketDetail: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="container py-5 text-center" style={{ maxWidth: 900 }}>
-        <div className="spinner-border text-zen-primary" role="status">
-          <span className="visually-hidden">Loading ticket...</span>
-        </div>
-        <p className="text-muted small mt-2">Loading ticket details...</p>
+      <div className="min-vh-100" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
+        <Navbar />
+        <main className="container py-5 text-center" style={{ maxWidth: 900 }}>
+          <div className="spinner-border text-zen-primary" role="status">
+            <span className="visually-hidden">Loading ticket...</span>
+          </div>
+          <p className="text-muted small mt-2">Loading ticket details...</p>
+        </main>
       </div>
     );
   }
 
   if (loadError || !ticket) {
     return (
-      <div className="container py-4" style={{ maxWidth: 900 }}>
-        <div className="alert alert-danger mb-3" role="alert">
-          <strong>Error:</strong> {loadError || 'Ticket not found'}
-        </div>
-        <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate('/staff/queue')}>
-          ← Back to Queue
-        </button>
+      <div className="min-vh-100" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
+        <Navbar />
+        <main className="container py-4" style={{ maxWidth: 900 }}>
+          <div className="alert alert-danger mb-3" role="alert">
+            <strong>Error:</strong> {loadError || 'Ticket not found'}
+          </div>
+          <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate('/staff/queue')}>
+            ← Back to Queue
+          </button>
+        </main>
       </div>
     );
   }
 
   return (
-    <div className="container py-3" style={{ maxWidth: 960 }}>
+    <div className="min-vh-100" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
+      <Navbar />
+      <main className="container py-3" style={{ maxWidth: 960 }}>
       <div className="d-flex justify-content-between align-items-center mb-3">
         <button type="button" className="btn btn-outline-secondary btn-sm" onClick={() => navigate('/staff/queue')}>
           ← Back to Queue
@@ -334,7 +323,7 @@ export const StaffTicketDetail: React.FC = () => {
           <div>
             <div className="d-flex align-items-center gap-2">
               <span className="fs-5 font-monospace fw-bold">{ticket.ticketNumber}</span>
-              <StatusBadge status={ticket.status} />
+              <TicketStatusBadge status={ticket.status} />
               <PriorityBadge priority={ticket.requestedPriority} />
             </div>
             <small className="opacity-75">
@@ -615,6 +604,7 @@ export const StaffTicketDetail: React.FC = () => {
           </div>
         </div>
       </div>
+      </main>
     </div>
   );
 };

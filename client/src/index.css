@@ -7,11 +7,108 @@
   --zen-neutral-dark: #1E293B;
   --zen-border: #D0E2D6;
   --zen-focus-ring: rgba(0, 107, 60, 0.25);
-  /* I-7 (ui-spec.md §7): distinguishes the Internal Notes panel from the
-     Public Comments panel on the Staff Ticket Detail screen — a Requester
-     never sees this panel at all (BR-24), but the color itself still needs
-     to read as clearly "different from public" for IT Staff/Administrator. */
+  --color-role-requester: #0B7A46;
+  --color-role-staff: #1D4ED8;
+  --color-role-admin: #7C2D92;
+  --color-status-open-bg: #EAF6EF;
+  --color-status-open-text: #006B3C;
+  --color-status-progress-bg: #DBEAFE;
+  --color-status-progress-text: #1D4ED8;
+  --color-status-waiting-bg: #FEF3C7;
+  --color-status-waiting-text: #B45309;
+  --color-status-resolved-bg: #D1FAE5;
+  --color-status-resolved-text: #047857;
+  --color-status-closed-bg: #F1F5F9;
+  --color-status-closed-text: #475569;
+  --color-status-reopened-bg: #FFEDD5;
+  --color-status-reopened-text: #C2410C;
+  --color-status-cancelled-bg: #FEE2E2;
+  --color-status-cancelled-text: #991B1B;
+  --color-status-unknown-bg: #E2E8F0;
+  --color-status-unknown-text: #334155;
   --color-internal-note-bg: #FDF4E7;
+}
+
+.zen-badge-role-requester { background-color: var(--color-role-requester); color: #fff; }
+.zen-badge-role-staff { background-color: var(--color-role-staff); color: #fff; }
+.zen-badge-role-admin { background-color: var(--color-role-admin); color: #fff; }
+.zen-badge-status-open { background-color: var(--color-status-open-bg); color: var(--color-status-open-text); }
+.zen-badge-status-progress { background-color: var(--color-status-progress-bg); color: var(--color-status-progress-text); }
+.zen-badge-status-waiting { background-color: var(--color-status-waiting-bg); color: var(--color-status-waiting-text); }
+.zen-badge-status-resolved { background-color: var(--color-status-resolved-bg); color: var(--color-status-resolved-text); }
+.zen-badge-status-closed { background-color: var(--color-status-closed-bg); color: var(--color-status-closed-text); }
+.zen-badge-status-reopened { background-color: var(--color-status-reopened-bg); color: var(--color-status-reopened-text); }
+.zen-badge-status-cancelled { background-color: var(--color-status-cancelled-bg); color: var(--color-status-cancelled-text); }
+.zen-badge-status-unknown { background-color: var(--color-status-unknown-bg); color: var(--color-status-unknown-text); }
+
+.table-sort-button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+:is(a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]):focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px var(--zen-primary);
+}
+
+.role-destination-link { text-decoration: none; }
+
+.queue-data-table {
+  min-width: 1050px;
+}
+
+.queue-data-table--desktop {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.queue-column-ticket { width: 14%; }
+.queue-column-created { width: 9%; }
+.queue-column-summary { width: 15%; }
+.queue-column-category { width: 8%; }
+.queue-column-requested-priority { width: 11%; }
+.queue-column-it-priority { width: 7%; }
+.queue-column-status { width: 13%; }
+.queue-column-owner { width: 9%; }
+.queue-column-updated { width: 8%; }
+.queue-column-action { width: 6%; }
+
+.queue-data-table td {
+  white-space: nowrap;
+}
+
+.queue-data-table--desktop th {
+  white-space: normal;
+}
+
+.queue-data-table--desktop td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.queue-data-table--desktop .queue-owner-name {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+
+.queue-results-table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 body {

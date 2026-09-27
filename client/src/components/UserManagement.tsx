@@ -1,18 +1,15 @@
-import React, { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, parseApiError, parseApiErrorDetail } from '../api';
 import { useDebouncedValue, usePaginatedFetch, useSavingAction } from '../hooks/usePaginatedFetch';
+import { Navbar } from './Navbar';
+import { ROLE_BADGE_CLASS, ROLE_LABEL } from '../constants/roles';
+import type { UserRole } from '../constants/roles';
 
 // I-8 (Issue #57): Administrator User Management. A single screen —
 // list + modal forms, deliberately minimal per ui-spec.md §8: no
 // pagination, no multi-column sort, no multiple simultaneous filters.
-// Follows the same self-contained full-page layout (own header/logout,
-// not the shared app-shell Navbar) established by StaffTicketQueue.tsx,
-// since Navbar's role-specific navigation for non-Requester roles has not
-// been built out in this codebase yet.
-
-export type UserRole = 'REQUESTER' | 'IT_STAFF' | 'ADMINISTRATOR';
+// Uses the shared authenticated shell so the Administrator sees the same
+// identity, role badge, and route navigation on every protected screen.
 
 export interface AdminUser {
   id: number;
@@ -22,21 +19,9 @@ export interface AdminUser {
   isActive: boolean;
 }
 
-const ROLE_LABEL: Record<UserRole, string> = {
-  REQUESTER: 'Requester',
-  IT_STAFF: 'IT Staff',
-  ADMINISTRATOR: 'Administrator',
-};
-
-const ROLE_BADGE_COLOR: Record<UserRole, string> = {
-  REQUESTER: '#0B7A46',
-  IT_STAFF: '#1D4ED8',
-  ADMINISTRATOR: '#7C2D92',
-};
-
 function RoleBadge({ role }: { role: UserRole }) {
   return (
-    <span className="badge fw-semibold" style={{ backgroundColor: ROLE_BADGE_COLOR[role] }} data-testid="role-badge">
+    <span className={`badge fw-semibold ${ROLE_BADGE_CLASS[role]}`} data-testid="role-badge">
       {ROLE_LABEL[role]}
     </span>
   );
@@ -119,14 +104,70 @@ function UserFormModal({
   extraContent,
 }: UserFormModalProps) {
   const idPrefix = mode;
+  const modalRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+
+    nameInputRef.current?.focus();
+
+    const handleTab = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        modal.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.offsetParent !== null);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (!first || !last) {
+        event.preventDefault();
+        modal.focus();
+      } else if (!modal.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleTab);
+    return () => {
+      document.removeEventListener('keydown', handleTab);
+      if (previouslyFocusedRef.current?.isConnected) previouslyFocusedRef.current.focus();
+    };
+  }, []);
 
   return (
-    <div className="modal d-block" tabIndex={-1} role="dialog" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+    <div
+      ref={modalRef}
+      className="modal d-block"
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`${idPrefix}-title`}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onClose();
+        }
+      }}
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+    >
       <div className="modal-dialog" role="document">
         <div className="modal-content">
           <form onSubmit={onSubmit}>
             <div className="modal-header">
-              <h5 className="modal-title">{title}</h5>
+              <h5 id={`${idPrefix}-title`} className="modal-title">{title}</h5>
               <button type="button" className="btn-close" onClick={onClose} aria-label="Close" />
             </div>
             <div className="modal-body">
@@ -143,6 +184,7 @@ function UserFormModal({
                   Name
                 </label>
                 <input
+                  ref={nameInputRef}
                   id={`${idPrefix}-name`}
                   type="text"
                   className="form-control"
@@ -229,8 +271,6 @@ function UserFormModal({
 }
 
 export const UserManagement: React.FC = () => {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
@@ -378,26 +418,17 @@ export const UserManagement: React.FC = () => {
     );
   };
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login', { replace: true });
-  };
-
   return (
-    <div className="container-fluid py-3 px-3 px-lg-4" style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)', minHeight: '100vh' }}>
+    <div className="min-vh-100" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
+      <Navbar />
+      <main className="container-fluid py-3 px-3 px-lg-4">
       <div className="d-flex justify-content-between align-items-center mb-3">
         <div>
           <h4 className="mb-0 fw-bold">🛡️ Administrator User Management</h4>
-          <small className="text-muted">Signed in as {user?.name}</small>
         </div>
-        <div className="d-flex gap-2">
-          <button type="button" className="btn btn-sm btn-zen-primary" onClick={openCreateModal}>
-            + Create User
-          </button>
-          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={handleLogout}>
-            Logout
-          </button>
-        </div>
+        <button type="button" className="btn btn-sm btn-zen-primary" onClick={openCreateModal}>
+          + Create User
+        </button>
       </div>
 
       <div className="card border-0 shadow-sm mb-3">
@@ -606,6 +637,7 @@ export const UserManagement: React.FC = () => {
           }
         />
       )}
+      </main>
     </div>
   );
 };

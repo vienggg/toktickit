@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { apiFetch, parseApiError } from '../api';
+import { ROLE_LABEL } from '../constants/roles';
+import type { UserRole } from '../constants/roles';
 
 // Extracted in review of PR #68 (item 5): this panel was copy-pasted
 // verbatim from TicketDetail.tsx (Requester) into StaffTicketDetail.tsx
@@ -20,12 +22,6 @@ export interface PublicCommentData {
   body: string;
   createdAt: string;
 }
-
-const ROLE_LABEL: Record<string, string> = {
-  REQUESTER: 'Requester',
-  IT_STAFF: 'IT Staff',
-  ADMINISTRATOR: 'Administrator',
-};
 
 function formatDate(iso: string): string {
   try {
@@ -107,7 +103,7 @@ export const PublicCommentsPanel: React.FC<PublicCommentsPanelProps> = ({
                       Staff/Admin authors always show their role badge. */}
                   {c.authorRole !== 'REQUESTER' && (
                     <span className="badge bg-secondary" style={{ fontSize: '0.65rem' }}>
-                      {ROLE_LABEL[c.authorRole] ?? c.authorRole}
+                      {ROLE_LABEL[c.authorRole as UserRole] ?? c.authorRole}
                     </span>
                   )}
                 </span>

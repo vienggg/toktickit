@@ -57,7 +57,8 @@ label ("Requested" vs "IT Priority"), never by a different color scale.
   - The current user's name and a role badge (`--color-role-*`).
   - Role-specific navigation links — a Requester never sees "Ticket Queue" or
     "User Management"; an IT Staff never sees "User Management"; an
-    Administrator sees "User Management" only.
+    Administrator sees both "Ticket Queue" and "User Management", matching
+    the explicit Administrator permissions in the project authorization matrix.
   - A "Logout" button (`.btn-zen-secondary`), always visible.
 * Direct navigation to a route outside the current role's permitted set
   redirects to `/login` (if unauthenticated) or to the role's default screen
@@ -147,36 +148,17 @@ new screen listed above.
 
 ## 10. Visual Inspection Checklist (Lab 3 additions)
 
-- [ ] Role badges (`--color-role-*`) render consistently in the Navbar across
-      every authenticated screen. (Not verified as written: the Navbar
-      component — and its role badge — is only mounted on the Requester's
-      screens (`RequesterWorkspace` at `/`). The Staff Queue, Staff Ticket
-      Detail, and Administrator User Management screens are each
-      self-contained pages with their own header and do not render the
-      shared `Navbar` or any role badge at all — see the comment at the top
-      of `UserManagement.tsx` acknowledging this directly. Confirmed by
-      inspection of `client/src/App.tsx`, `Navbar.tsx`,
-      `StaffTicketQueue.tsx`, and `UserManagement.tsx` during I-9; not a
-      Playwright-checkable "true" until role-specific navigation is built
-      into those screens.)
-- [x] Status badges never reuse a Priority badge's background color.
-      Verified in `e2e/lab-03/visual-inspection.spec.ts` ("status badges
-      never reuse a priority badge's background color") by comparing the
-      computed `background-color` of a `[data-testid=status-badge]` and a
-      `[data-testid=priority-badge]` on the Staff Queue — they differ.
-      (Narrowed in review of PR #70, item 5 — the original wording also
-      claimed status badges "use the 7-color scale in §1", which this test
-      never checked: it only asserts the two colors differ, not that either
-      one is drawn from the declared palette. On inspection, that broader
-      claim does not currently hold either way: `StatusBadge` in
-      `StaffTicketQueue.tsx` applies classes like `zen-badge-status-open`,
-      but no CSS file in `client/src` defines a `zen-badge-status-*` class
-      or the `--color-status-*` custom properties §1 declares — only
-      `--color-internal-note-bg` is actually defined in `client/src/index.css`.
-      Status badges therefore currently render as unstyled Bootstrap
-      `.badge` elements, not the declared 7-color scale. Fixing that
-      implementation gap is out of scope for this checklist-wording fix; it
-      is flagged separately as its own follow-up.)
+- [x] Role badges (`--color-role-*`) and role-specific destinations render
+      correctly across the Requester workspace, Staff Queue/Detail, and
+      Administrator Queue/Detail/User Management screens. Verified in
+      `e2e/lab-03/visual-inspection.spec.ts` by signing in as all three roles,
+      checking their allowed destinations, and navigating through each
+      role's authenticated screens.
+- [x] Each status badge uses its declared background/text tokens in §1, rather
+      than only differing from a Priority badge. Verified in
+      `e2e/lab-03/visual-inspection.spec.ts` by filtering to each of the eight
+      statuses and comparing computed background and text colors to the
+      specification.
 - [x] Public Comments and Internal Notes panels are visually distinguishable
       at a glance, including on a 375px screen where they stack vertically.
       Verified in `e2e/lab-03/visual-inspection.spec.ts` ("panel backgrounds
@@ -190,38 +172,32 @@ new screen listed above.
       asserting the Requested Priority container contains no
       `<select>`/`<input>` while `#it-priority-select` is a real, interactive
       `<select>`.
-- [ ] "Ticket Owner select vs. static 'Unassigned' text" are distinguishable.
-      (Corrected in review of PR #70, item 4 — this half of the item as
-      originally written describes a UI state that does not exist:
-      `StaffTicketDetail.tsx`'s Owner field is always a single `<select
-      id="owner-select">`, with "Unassigned" as one of its own `<option>`
-      values (`<option value="">Unassigned</option>`), not a separate
-      static-text state rendered instead of the select when there is no
-      owner. There is nothing to distinguish "select" from "static text"
-      for Owner because Owner is never static text. Left unchecked, honestly,
-      rather than checked against a test that only exercises the unrelated
-      Requested-Priority/IT-Priority pair on this same original line.)
-- [ ] Validation errors render beneath their field on every new form (Login,
-      Change Password, Create/Edit User). (Only partially true, not checked
-      off wholesale: `UserManagement.tsx`'s Create/Edit User modals do
-      render field-level errors beneath the offending input (confirmed by
-      code inspection — `fieldErrorsFromCode` + per-field `<div
-      className="text-danger small">` under Name/Email/Role/Initial
-      Password). Login and Change Password, however, only ever show a
-      single banner above the form — per `ui-spec.md` §2's own description
-      ("error (inline banner above the form...)") and confirmed against
-      `Login.tsx`/`ChangePassword.tsx`, neither has any beneath-field error
-      rendering to check. The checklist item as written ("every new form")
-      does not hold for those two forms by the design itself, not by an
-      implementation gap.)
-- [ ] Focus states are visible on every new interactive control (buttons,
-      selects, the status dropdown). (Not verified: no `outline: none` or
-      focus-ring override was found in `client/src/index.css` or any
-      component during inspection, so Bootstrap's default focus rings are
-      presumably intact, but this checklist item asks for a visible focus
-      ring on every new control and that was not exercised end-to-end with
-      a real keyboard-focus assertion in Playwright — left unchecked rather
-      than checked on inspection alone.)
+- [x] The Queue's static "Unassigned" pill is distinguishable from the
+      editable Owner selector on Ticket Detail. Verified in
+      `e2e/lab-03/visual-inspection.spec.ts` by selecting an unassigned queue
+      row, then confirming the detail view renders an editable `<select>`
+      with a different appearance.
+- [x] Validation feedback appears in the location specified for each form:
+      Login and Change Password use an inline alert banner; Create/Edit User
+      errors appear beneath the offending field. Verified in
+      `e2e/lab-03/visual-inspection.spec.ts` with invalid login credentials,
+      a weak forced-change password, a weak initial password on Create User,
+      and a duplicate email on Edit User.
+- [x] Focus states are visible on every visible, enabled keyboard control.
+      `auditEveryVisibleTabStop` in `e2e/lab-03/visual-inspection.spec.ts`
+      walks real Tab order and checks a visible focus indicator on Login and
+      Change Password, Requester My Tickets/Create/Detail/Edit, Staff and
+      Administrator Queue/Detail, and Administrator User List/Create/Edit
+      (including the set-initial-password state). It covers the mobile
+      Requester list/create, mobile Staff Queue cards, mobile Administrator
+      User List, and tablet Staff Queue as well as desktop layouts. The same
+      suite verifies that Add Attachment is keyboard-operable and that the
+      attachment-removal and Administrator user dialogs close on Escape and
+      restore focus to their openers. The attachment-removal dialog also has
+      an accessible name, contains focus, and can be confirmed from the UI.
+      Keyboard activation of sortable headers and ticket cards is also
+      exercised. Disabled controls are not Tab stops and are not included in
+      the focus sweep.
 - [x] No clipping of role badges, status badges, or owner names at 375px.
       Verified in `e2e/lab-03/visual-inspection.spec.ts` ("mobile ticket
       cards keep status/priority badges and owner name within the
@@ -231,6 +207,11 @@ new screen listed above.
       Verified in `e2e/lab-03/visual-inspection.spec.ts` at all three
       viewports (1280/768/375px) by asserting
       `document.documentElement.scrollWidth <= document.documentElement.clientWidth`.
+- [x] No page-level horizontal overflow at 375px across the Lab 3 screens:
+      Login, forced password change, Requester My Tickets/Create/Detail,
+      Staff Queue/Detail, Administrator Queue/User List/Create modal/Edit
+      modal. Verified by checking the document width against the viewport at
+      each state in `e2e/lab-03/visual-inspection.spec.ts`.
 - [x] Forbidden and not-found states never render a blank screen or an
       unstyled browser error page. Verified in
       `e2e/lab-03/visual-inspection.spec.ts`: an IT Staff session hitting

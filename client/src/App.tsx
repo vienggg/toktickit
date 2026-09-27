@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { RequireAuth, RequireRole, RedirectIfAuthenticated } from './components/ProtectedRoute';
 import { Navbar } from './components/Navbar';
 import { Login } from './components/Login';
@@ -48,6 +48,13 @@ function RequesterWorkspace() {
       </footer>
     </div>
   );
+}
+
+function RoleHome() {
+  const { user } = useAuth();
+  if (!user) return null;
+  if (user.role === 'REQUESTER') return <RequesterWorkspace />;
+  return <Navigate to="/staff/queue" replace />;
 }
 
 export default function App() {
@@ -101,14 +108,7 @@ export default function App() {
               </RequireAuth>
             }
           />
-          <Route
-            path="/*"
-            element={
-              <RequireAuth>
-                <RequesterWorkspace />
-              </RequireAuth>
-            }
-          />
+          <Route path="*" element={<RequireAuth><RoleHome /></RequireAuth>} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

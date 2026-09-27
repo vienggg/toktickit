@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { Link, useNavigate } from 'react-router-dom';
 import { apiFetch, parseApiError } from '../api';
 import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, useStaffMembers, formatDate } from '../hooks/usePaginatedFetch';
+import { Navbar } from './Navbar';
+import { TicketStatusBadge } from './TicketStatusBadge';
 
 export interface StaffQueueTicket {
   id: number;
@@ -33,26 +34,7 @@ const DEFAULT_PAGINATION: PaginationMeta = { page: 1, pageSize: 10, total: 0, to
 
 const STATUS_OPTIONS = ['NEW', 'OPEN', 'IN_PROGRESS', 'WAITING_FOR_REQUESTER', 'RESOLVED', 'CLOSED', 'REOPENED', 'CANCELLED'];
 const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
-
-const STATUS_BADGE: Record<string, string> = {
-  NEW: 'status-open',
-  OPEN: 'status-open',
-  IN_PROGRESS: 'status-progress',
-  WAITING_FOR_REQUESTER: 'status-waiting',
-  RESOLVED: 'status-resolved',
-  CLOSED: 'status-closed',
-  REOPENED: 'status-reopened',
-  CANCELLED: 'status-cancelled',
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const cls = STATUS_BADGE[status] ?? 'status-closed';
-  return (
-    <span className={`badge zen-badge-${cls}`} data-testid="status-badge">
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
+type QueueSortField = 'ticketNumber' | 'createdAt' | 'itPriority' | 'status' | 'updatedAt';
 
 function PriorityBadge({ priority, label }: { priority: string; label: string }) {
   const variant =
@@ -67,12 +49,16 @@ function PriorityBadge({ priority, label }: { priority: string; label: string })
 function OwnerPill({ name }: { name: string | null }) {
   if (!name) {
     return (
-      <span className="badge" style={{ backgroundColor: 'var(--color-border-subtle, #E2E8F0)', color: '#475569' }}>
+      <span
+        className="badge"
+        data-testid="unassigned-owner"
+        style={{ backgroundColor: 'var(--color-border-subtle, #E2E8F0)', color: '#475569' }}
+      >
         Unassigned
       </span>
     );
   }
-  return <span>{name}</span>;
+  return <span className="queue-owner-name" title={name}>{name}</span>;
 }
 
 // The read-only TicketDetailModal built as I-6's stopgap ("Open" action)
@@ -95,7 +81,6 @@ interface QueuePage {
 }
 
 export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }> = ({ onOpenTicket }) => {
-  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const categories = useCategoryOptions();
@@ -110,7 +95,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   const [itPriority, setItPriority] = useState('All');
   const [categoryId, setCategoryId] = useState('All');
   const [ownerFilter, setOwnerFilter] = useState('All'); // 'All' | 'unassigned' | userId
-  const [sort, setSort] = useState('updatedAt');
+  const [sort, setSort] = useState<QueueSortField>('updatedAt');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -171,7 +156,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
     setPage(1);
   };
 
-  const handleSortClick = (field: string) => {
+  const handleSortClick = (field: QueueSortField) => {
     if (sort === field) {
       setOrder(order === 'asc' ? 'desc' : 'asc');
     } else {
@@ -192,11 +177,6 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
     else navigate(`/staff/tickets/${ticket.id}`);
   };
 
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login', { replace: true });
-  };
-
   const isEmptyQueue = !isLoading && !error && tickets.length === 0 && !hasActiveFilters && pagination.total === 0;
   const isNoResults = !isLoading && !error && tickets.length === 0 && hasActiveFilters;
   // Covers the item-5 stale-page case: filters are inactive, there ARE
@@ -208,16 +188,10 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   const showPagination = !isLoading && !error && pagination.total > 0;
 
   return (
-    <div className="container-fluid py-3 px-3 px-lg-4" style={{ backgroundColor: 'var(--zen-neutral-light, #F5F7F6)', minHeight: '100vh' }}>
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <div>
-          <h4 className="mb-0 fw-bold">🎫 IT Staff Ticket Queue</h4>
-          <small className="text-muted">Signed in as {user?.name}</small>
-        </div>
-        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={handleLogout}>
-          Logout
-        </button>
-      </div>
+    <div className="min-vh-100" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
+      <Navbar />
+      <main className="container-fluid py-3 px-3 px-lg-4">
+      <h4 className="mb-3 fw-bold">🎫 IT Staff Ticket Queue</h4>
 
       <div className="card border-0 shadow-sm mb-3">
         <div className="card-body">
@@ -340,7 +314,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
         </div>
       )}
 
-      {isLoading && (
+      {isLoading && tickets.length === 0 && (
         <div className="card border-0 shadow-sm">
           <div className="card-body">
             {[...Array(5)].map((_, i) => (
@@ -379,45 +353,47 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
         </div>
       )}
 
-      {!isLoading && !error && tickets.length > 0 && (
-        <>
+      {tickets.length > 0 && (
+        <div aria-busy={isLoading}>
           {/* Desktop table (>=992px) */}
           <div className="d-none d-lg-block card border-0 shadow-sm">
-            <div className="table-responsive">
-              <table className="table table-hover align-middle mb-0">
+            <div className="table-responsive queue-results-table" role="region" aria-label="Ticket results" tabIndex={0}>
+              <table className="table table-sm queue-data-table queue-data-table--desktop table-hover align-middle mb-0">
+                <colgroup>
+                  <col className="queue-column-ticket" />
+                  <col className="queue-column-created" />
+                  <col className="queue-column-summary" />
+                  <col className="queue-column-category" />
+                  <col className="queue-column-requested-priority" />
+                  <col className="queue-column-it-priority" />
+                  <col className="queue-column-status" />
+                  <col className="queue-column-owner" />
+                  <col className="queue-column-updated" />
+                  <col className="queue-column-action" />
+                </colgroup>
                 <thead className="table-light small">
                   <tr>
-                    <th role="button" onClick={() => handleSortClick('ticketNumber')}>
-                      Ticket Number
-                    </th>
-                    <th role="button" onClick={() => handleSortClick('createdAt')}>
-                      Created Date
-                    </th>
+                    <SortableHeader field="ticketNumber" label="Ticket Number" sort={sort} order={order} onSort={handleSortClick} />
+                    <SortableHeader field="createdAt" label="Created Date" sort={sort} order={order} onSort={handleSortClick} />
                     <th>Summary</th>
                     <th>Category</th>
                     <th>Requested Priority</th>
-                    <th role="button" onClick={() => handleSortClick('itPriority')}>
-                      IT Priority
-                    </th>
-                    <th role="button" onClick={() => handleSortClick('status')}>
-                      Status
-                    </th>
+                    <SortableHeader field="itPriority" label="IT Priority" sort={sort} order={order} onSort={handleSortClick} />
+                    <SortableHeader field="status" label="Status" sort={sort} order={order} onSort={handleSortClick} />
                     <th>Owner</th>
-                    <th role="button" onClick={() => handleSortClick('updatedAt')}>
-                      Last Updated
-                    </th>
+                    <SortableHeader field="updatedAt" label="Last Updated" sort={sort} order={order} onSort={handleSortClick} />
                     <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {tickets.map((t) => (
                     <tr key={t.id}>
-                      <td className="font-monospace">{t.ticketNumber}</td>
+                      <td className="font-monospace" title={t.ticketNumber}>{t.ticketNumber}</td>
                       <td className="small text-muted">{formatDate(t.createdAt)}</td>
-                      <td className="text-truncate" style={{ maxWidth: 260 }}>
+                      <td className="text-truncate" title={t.summary}>
                         {t.summary}
                       </td>
-                      <td>{t.category?.name}</td>
+                      <td title={t.category?.name}>{t.category?.name}</td>
                       <td>
                         <PriorityBadge priority={t.requestedPriority} label="Requested" />
                       </td>
@@ -425,9 +401,9 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                         <PriorityBadge priority={t.itPriority} label="IT Priority" />
                       </td>
                       <td>
-                        <StatusBadge status={t.status} />
+                        <TicketStatusBadge status={t.status} />
                       </td>
-                      <td>
+                      <td className="queue-owner-cell">
                         <OwnerPill name={t.ownerName} />
                       </td>
                       <td className="small text-muted">{formatDate(t.updatedAt)}</td>
@@ -445,8 +421,8 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
 
           {/* Tablet condensed table (768-991px) */}
           <div className="d-none d-md-block d-lg-none card border-0 shadow-sm">
-            <div className="table-responsive">
-              <table className="table table-hover align-middle mb-0">
+            <div className="table-responsive queue-results-table" role="region" aria-label="Ticket results" tabIndex={0}>
+              <table className="table queue-data-table table-hover align-middle mb-0">
                 <thead className="table-light small">
                   <tr>
                     {/* Item 6 fix (review of PR #67): the tablet table previously
@@ -455,13 +431,9 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                         the desktop table's sortable columns and fit the
                         condensed width; the same handleSortClick handler is
                         reused so both layouts stay in sync on sort state. */}
-                    <th role="button" onClick={() => handleSortClick('ticketNumber')}>
-                      Ticket Number
-                    </th>
+                    <SortableHeader field="ticketNumber" label="Ticket Number" sort={sort} order={order} onSort={handleSortClick} />
                     <th>Summary</th>
-                    <th role="button" onClick={() => handleSortClick('status')}>
-                      Status
-                    </th>
+                    <SortableHeader field="status" label="Status" sort={sort} order={order} onSort={handleSortClick} />
                     <th>IT Priority</th>
                     <th>Owner</th>
                     <th>Action</th>
@@ -475,7 +447,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                         {t.summary}
                       </td>
                       <td>
-                        <StatusBadge status={t.status} />
+                        <TicketStatusBadge status={t.status} />
                       </td>
                       <td>
                         <PriorityBadge priority={t.itPriority} label="IT Priority" />
@@ -498,17 +470,23 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
           {/* Mobile cards (<768px) */}
           <div className="d-md-none d-flex flex-column gap-2">
             {tickets.map((t) => (
-              <div
+              <Link
                 key={t.id}
-                className="card border-0 shadow-sm"
-                role="button"
-                onClick={() => handleOpen(t)}
+                to={`/staff/tickets/${t.id}`}
+                className="card ticket-card-link border-0 shadow-sm text-start w-100 p-0 text-decoration-none text-reset"
+                aria-label={`Open ticket ${t.ticketNumber}: ${t.summary}`}
+                onClick={(event) => {
+                  if (onOpenTicket) {
+                    event.preventDefault();
+                    onOpenTicket(t.id);
+                  }
+                }}
                 data-testid="ticket-card"
               >
                 <div className="card-body">
                   <div className="d-flex justify-content-between align-items-start mb-1">
                     <span className="font-monospace fw-semibold">{t.ticketNumber}</span>
-                    <StatusBadge status={t.status} />
+                    <TicketStatusBadge status={t.status} />
                   </div>
                   <div className="mb-2">{t.summary}</div>
                   <div className="d-flex justify-content-between align-items-center">
@@ -516,10 +494,10 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                     <OwnerPill name={t.ownerName} />
                   </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       {showPagination && (
@@ -548,6 +526,31 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
         </div>
       )}
 
+      </main>
     </div>
   );
 };
+
+function SortableHeader({
+  field,
+  label,
+  sort,
+  order,
+  onSort,
+}: {
+  field: QueueSortField;
+  label: string;
+  sort: QueueSortField;
+  order: 'asc' | 'desc';
+  onSort: (field: QueueSortField) => void;
+}) {
+  const ariaSort = sort !== field ? 'none' : order === 'asc' ? 'ascending' : 'descending';
+  return (
+    <th scope="col" aria-sort={ariaSort}>
+      <button type="button" className="table-sort-button" onClick={() => onSort(field)}>
+        {label}
+        {sort === field && <span className="visually-hidden">, sorted {order === 'asc' ? 'ascending' : 'descending'}</span>}
+      </button>
+    </th>
+  );
+}

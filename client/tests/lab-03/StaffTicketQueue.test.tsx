@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { AuthProvider } from '../../src/context/AuthContext';
 import { StaffTicketQueue } from '../../src/components/StaffTicketQueue';
@@ -174,6 +175,33 @@ describe('IT Staff Ticket Queue (UI-03, UI-04, UI-05)', () => {
     renderQueue();
     await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
     expect(screen.getAllByTestId('ticket-card').length).toBeGreaterThan(0);
+  });
+
+  it('UI-05: mobile ticket cards are keyboard-operable links', async () => {
+    const user = userEvent.setup();
+    renderQueueWithDetailRoute();
+    await waitFor(() => expect(screen.getAllByTestId('ticket-card').length).toBeGreaterThan(0));
+
+    const card = screen.getAllByTestId('ticket-card')[0];
+    expect(card.tagName).toBe('A');
+    expect(card).toHaveAttribute('href');
+    card.focus();
+    await user.keyboard('{Enter}');
+
+    expect(await screen.findByTestId('detail-route-stub')).toBeInTheDocument();
+  });
+
+  it('UI-04: sortable column headers expose button controls that work by keyboard', async () => {
+    const user = userEvent.setup();
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    const lastUpdatedSortButton = screen.getByRole('button', { name: /Last Updated/i });
+    const header = lastUpdatedSortButton.closest('th');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    lastUpdatedSortButton.focus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
   });
 
   // Added in review of PR #67 (item 1): the "Open" button previously

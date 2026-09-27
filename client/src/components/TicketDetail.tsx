@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiFetch, parseApiError } from '../api';
 import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
 
@@ -78,6 +78,9 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [removalReason, setRemovalReason] = useState<string>('');
   const [targetAttachmentToRemove, setTargetAttachmentToRemove] = useState<Attachment | null>(null);
+  const removalDialogRef = useRef<HTMLDivElement>(null);
+  const removalCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const removalDialogOpenerRef = useRef<HTMLElement | null>(null);
 
   // Public Comments state
   const [comments, setComments] = useState<PublicCommentData[]>([]);
@@ -156,6 +159,60 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     loadRef();
     return () => controller.abort();
   }, [fetchTicketDetail, fetchComments]);
+
+  useEffect(() => {
+    if (!targetAttachmentToRemove) return;
+
+    const dialog = removalDialogRef.current;
+    if (!dialog) return;
+
+    removalCancelButtonRef.current?.focus();
+
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setTargetAttachmentToRemove(null);
+        setRemovalReason('');
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleDialogKeyDown);
+      const opener = removalDialogOpenerRef.current;
+      if (opener?.isConnected) opener.focus();
+      removalDialogOpenerRef.current = null;
+    };
+  }, [targetAttachmentToRemove]);
+
+  const closeAttachmentRemovalDialog = () => {
+    setTargetAttachmentToRemove(null);
+    setRemovalReason('');
+  };
 
   const handleSignalResolution = async () => {
     setResolutionSignalError(null);
@@ -618,7 +675,21 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                 📎 Attachments ({ticket.attachments.length} / 5)
               </h6>
               {ticket.attachments.length < 5 && (
-                <label className="btn btn-sm btn-zen-outline mb-0 cursor-pointer">
+                <label
+                  className="btn btn-sm btn-zen-outline mb-0 cursor-pointer"
+                  role="button"
+                  aria-label="Add attachment"
+                  aria-disabled={isUploading}
+                  tabIndex={isUploading ? -1 : 0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      if (!isUploading) {
+                        event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+                      }
+                    }
+                  }}
+                >
                   {isUploading ? 'Uploading...' : '➕ Add Attachment'}
                   <input
                     type="file"
@@ -666,7 +737,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-danger"
-                        onClick={() => setTargetAttachmentToRemove(att)}
+                        onClick={(event) => {
+                          removalDialogOpenerRef.current = event.currentTarget;
+                          setTargetAttachmentToRemove(att);
+                        }}
                       >
                         🗑️ Remove
                       </button>
@@ -766,19 +840,23 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
       {/* Soft-Removal Confirmation Modal */}
       {targetAttachmentToRemove && (
         <div
+          ref={removalDialogRef}
           className="modal fade show d-block"
           tabIndex={-1}
           role="dialog"
+          aria-modal="true"
+          aria-labelledby="attachment-removal-title"
           style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(2px)' }}
         >
           <div className="modal-dialog modal-dialog-centered" role="document">
             <div className="modal-content shadow-lg border-0" style={{ borderRadius: '0.75rem' }}>
               <div className="modal-header border-0 bg-danger text-white">
-                <h5 className="modal-title fw-bold">🗑️ Confirm Attachment Removal</h5>
+                <h5 id="attachment-removal-title" className="modal-title fw-bold">🗑️ Confirm Attachment Removal</h5>
                 <button
                   type="button"
                   className="btn-close btn-close-white"
-                  onClick={() => setTargetAttachmentToRemove(null)}
+                  aria-label="Close"
+                  onClick={closeAttachmentRemovalDialog}
                 ></button>
               </div>
               <div className="modal-body p-4">
@@ -804,9 +882,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
               </div>
               <div className="modal-footer border-top bg-light">
                 <button
+                  ref={removalCancelButtonRef}
                   type="button"
                   className="btn btn-outline-secondary btn-sm"
-                  onClick={() => setTargetAttachmentToRemove(null)}
+                  onClick={closeAttachmentRemovalDialog}
                 >
                   Cancel
                 </button>

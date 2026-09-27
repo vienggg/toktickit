@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '../../src/context/AuthContext';
@@ -56,7 +56,9 @@ describe('Login Screen (AC-01, AC-05, AC-06)', () => {
       expect(screen.getByRole('button', { name: /logging in/i })).toBeDisabled();
     });
 
-    resolveLogin({ ok: true, json: async () => ({ user: { id: 1, mustChangePassword: false } }) } as Response);
+    await act(async () => {
+      resolveLogin({ ok: true, json: async () => ({ user: { id: 1, mustChangePassword: false } }) } as Response);
+    });
   });
 
   it('UI-01c: renders a generic error message on invalid credentials (BR-06 — no field is singled out)', async () => {

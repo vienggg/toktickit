@@ -76,13 +76,13 @@ async function main() {
     { name: 'Daniel Osei', email: 'daniel.osei@toktick.internal', department: 'IT Administration', isActive: true },
   ];
 
-  // Requesters: only set role/password fields on CREATE. An upsert `update`
-  // here deliberately does not touch role/password so a real user's later
-  // password change or role edit is never clobbered by re-running the seed.
+  // Seeded Requesters are created with the demo profile once. Keep the
+  // update branch empty so rerunning the seed does not overwrite profile,
+  // role, activation, or password changes made through the application.
   for (const req of requestersData) {
     await prisma.user.upsert({
       where: { email: req.email },
-      update: { name: req.name, department: req.department, isActive: req.isActive },
+      update: {},
       create: { ...req, role: Role.REQUESTER, passwordHash: initialPasswordHash, mustChangePassword: true },
     });
   }
