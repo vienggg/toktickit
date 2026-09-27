@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
-import { DevRequesterProvider } from './context/DevRequesterContext';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { RequireAuth, RequireRole, RedirectIfAuthenticated } from './components/ProtectedRoute';
 import { Navbar } from './components/Navbar';
-import { DevRequesterModal } from './components/DevRequesterModal';
+import { Login } from './components/Login';
+import { ChangePassword } from './components/ChangePassword';
 import { CreateTicket } from './components/CreateTicket';
 import { MyTickets } from './components/MyTickets';
 import { TicketDetail } from './components/TicketDetail';
+import { StaffTicketQueue } from './components/StaffTicketQueue';
+import { StaffTicketDetail } from './components/StaffTicketDetail';
+import { UserManagement } from './components/UserManagement';
 
-function MainContent() {
+function RequesterWorkspace() {
   const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
   const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
 
@@ -18,7 +24,6 @@ function MainContent() {
   return (
     <div className="min-vh-100 d-flex flex-column" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
       <Navbar currentView={activeTab} setCurrentView={setActiveTab} />
-      <DevRequesterModal />
 
       <main className="container py-4 flex-grow-1">
         {activeTab === 'create' && <CreateTicket />}
@@ -45,10 +50,67 @@ function MainContent() {
   );
 }
 
+function RoleHome() {
+  const { user } = useAuth();
+  if (!user) return null;
+  if (user.role === 'REQUESTER') return <RequesterWorkspace />;
+  return <Navigate to="/staff/queue" replace />;
+}
+
 export default function App() {
   return (
-    <DevRequesterProvider>
-      <MainContent />
-    </DevRequesterProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <RedirectIfAuthenticated>
+                <Login />
+              </RedirectIfAuthenticated>
+            }
+          />
+          <Route
+            path="/change-password"
+            element={
+              <RequireAuth>
+                <ChangePassword />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/staff/queue"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['IT_STAFF', 'ADMINISTRATOR']}>
+                  <StaffTicketQueue />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/staff/tickets/:id"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['IT_STAFF', 'ADMINISTRATOR']}>
+                  <StaffTicketDetail />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['ADMINISTRATOR']}>
+                  <UserManagement />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route path="*" element={<RequireAuth><RoleHome /></RequireAuth>} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

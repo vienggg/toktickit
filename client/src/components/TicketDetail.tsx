@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useDevRequester } from '../context/DevRequesterContext';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetch, parseApiError } from '../api';
+import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
 
 interface Attachment {
   id: number;
@@ -19,7 +20,7 @@ interface TicketDetailData {
   summary: string;
   description: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
-  status: 'New' | 'In Progress' | 'Resolved' | 'Closed';
+  status: string;
   categoryId: number;
   category: { id: number; name: string };
   relatedSystemId?: number | null;
@@ -28,6 +29,13 @@ interface TicketDetailData {
   requester: { id: number; name: string; email: string; department: string };
   attachments: Attachment[];
   removedAttachments?: Attachment[];
+  requesterResolvedAt?: string | null;
+  // Server-computed (BR-05, D-10): true unless the ticket is already
+  // terminal or already signaled. Fixed in review: this used to be a
+  // client-side duplicate of the server's status list, with two dead
+  // entries (raw uppercase values that could never actually reach the
+  // client) and no shared source of truth with the server's own check.
+  canSignalResolution: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,8 +56,6 @@ interface TicketDetailProps {
 }
 
 export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) => {
-  const { currentRequester } = useDevRequester();
-
   const [ticket, setTicket] = useState<TicketDetailData | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [systems, setSystems] = useState<SystemOption[]>([]);
@@ -72,14 +78,43 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [removalReason, setRemovalReason] = useState<string>('');
   const [targetAttachmentToRemove, setTargetAttachmentToRemove] = useState<Attachment | null>(null);
+  const removalDialogRef = useRef<HTMLDivElement>(null);
+  const removalCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const removalDialogOpenerRef = useRef<HTMLElement | null>(null);
+
+  // Public Comments state
+  const [comments, setComments] = useState<PublicCommentData[]>([]);
+  const [commentsLoadError, setCommentsLoadError] = useState<string | null>(null);
+
+  // "Problem Appears Resolved" state
+  const [isSignalingResolution, setIsSignalingResolution] = useState<boolean>(false);
+  const [resolutionSignalError, setResolutionSignalError] = useState<string | null>(null);
+
+  const fetchComments = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}/comments`, { signal });
+      if (!res.ok) {
+        // Fixed in review: this previously did nothing on a non-ok
+        // response, leaving a stale/empty list with no indication
+        // anything had failed — unlike fetchTicketDetail's own handling.
+        setCommentsLoadError(await parseApiError(res, `Failed to load comments (HTTP ${res.status})`));
+        return;
+      }
+      setComments(await res.json());
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name !== 'AbortError') {
+        setCommentsLoadError('Failed to load comments. Please try again.');
+      }
+    }
+  }, [ticketId]);
 
   const fetchTicketDetail = useCallback(async (preserveDrafts = false, signal?: AbortSignal) => {
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/tickets/${ticketId}`, { signal });
+      const res = await apiFetch(`/api/tickets/${ticketId}`, { signal });
       if (!res.ok) {
-        throw new Error(`Ticket not found or error loading (HTTP ${res.status})`);
+        throw new Error(await parseApiError(res, `Ticket not found or error loading (HTTP ${res.status})`));
       }
       const data: TicketDetailData = await res.json();
       setTicket(data);
@@ -104,13 +139,14 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   useEffect(() => {
     const controller = new AbortController();
     fetchTicketDetail(false, controller.signal);
+    fetchComments(controller.signal);
 
     // Load category and system lists
     async function loadRef() {
       try {
         const [catRes, sysRes] = await Promise.all([
-          fetch('/api/categories', { signal: controller.signal }),
-          fetch('/api/systems', { signal: controller.signal }),
+          apiFetch('/api/categories', { signal: controller.signal }),
+          apiFetch('/api/systems', { signal: controller.signal }),
         ]);
         if (catRes.ok) setCategories(await catRes.json());
         if (sysRes.ok) setSystems(await sysRes.json());
@@ -122,7 +158,84 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     }
     loadRef();
     return () => controller.abort();
-  }, [fetchTicketDetail]);
+  }, [fetchTicketDetail, fetchComments]);
+
+  useEffect(() => {
+    if (!targetAttachmentToRemove) return;
+
+    const dialog = removalDialogRef.current;
+    if (!dialog) return;
+
+    removalCancelButtonRef.current?.focus();
+
+    const handleDialogKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setTargetAttachmentToRemove(null);
+        setRemovalReason('');
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleDialogKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleDialogKeyDown);
+      const opener = removalDialogOpenerRef.current;
+      if (opener?.isConnected) opener.focus();
+      removalDialogOpenerRef.current = null;
+    };
+  }, [targetAttachmentToRemove]);
+
+  const closeAttachmentRemovalDialog = () => {
+    setTargetAttachmentToRemove(null);
+    setRemovalReason('');
+  };
+
+  const handleSignalResolution = async () => {
+    setResolutionSignalError(null);
+    setIsSignalingResolution(true);
+    try {
+      const res = await apiFetch(`/api/tickets/${ticketId}/resolution-signal`, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error(await parseApiError(res, 'Failed to record your response'));
+      }
+      // Fixed in review: merge the response directly instead of
+      // re-fetching the entire ticket (which flips isLoading and
+      // unmounts the whole detail view, discarding any in-progress edit)
+      // and re-fetching the whole comment thread, when the response
+      // already contains both the new timestamp and the created comment.
+      const data: { requesterResolvedAt: string; comment: PublicCommentData } = await res.json();
+      setTicket((prev) => (prev ? { ...prev, requesterResolvedAt: data.requesterResolvedAt, canSignalResolution: false } : prev));
+      setComments((prev) => [...prev, data.comment]);
+    } catch (err) {
+      setResolutionSignalError(err instanceof Error ? err.message : 'Failed to record your response');
+    } finally {
+      setIsSignalingResolution(false);
+    }
+  };
 
   const handleStartEdit = () => {
     if (!ticket) return;
@@ -179,15 +292,14 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
         relatedSystemId: editRelatedSystemId ? parseInt(editRelatedSystemId, 10) : null,
       };
 
-      const res = await fetch(`/api/tickets/${ticketId}`, {
+      const res = await apiFetch(`/api/tickets/${ticketId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Update failed (HTTP ${res.status})`);
+        throw new Error(await parseApiError(res, `Update failed (HTTP ${res.status})`));
       }
 
       const updatedData: TicketDetailData = await res.json();
@@ -218,14 +330,13 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
       const formData = new FormData();
       files.forEach((file) => formData.append('attachments', file));
 
-      const res = await fetch(`/api/tickets/${ticketId}/attachments`, {
+      const res = await apiFetch(`/api/tickets/${ticketId}/attachments`, {
         method: 'POST',
         body: formData,
       });
 
       if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Upload failed');
+        throw new Error(await parseApiError(res, 'Upload failed'));
       }
 
       await fetchTicketDetail();
@@ -242,7 +353,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     if (!targetAttachmentToRemove) return;
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/tickets/${ticketId}/attachments/${targetAttachmentToRemove.id}`,
         {
           method: 'DELETE',
@@ -564,7 +675,21 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                 📎 Attachments ({ticket.attachments.length} / 5)
               </h6>
               {ticket.attachments.length < 5 && (
-                <label className="btn btn-sm btn-zen-outline mb-0 cursor-pointer">
+                <label
+                  className="btn btn-sm btn-zen-outline mb-0 cursor-pointer"
+                  role="button"
+                  aria-label="Add attachment"
+                  aria-disabled={isUploading}
+                  tabIndex={isUploading ? -1 : 0}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      if (!isUploading) {
+                        event.currentTarget.querySelector<HTMLInputElement>('input[type="file"]')?.click();
+                      }
+                    }
+                  }}
+                >
                   {isUploading ? 'Uploading...' : '➕ Add Attachment'}
                   <input
                     type="file"
@@ -595,7 +720,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                       <span className="fs-4">📄</span>
                       <div>
                         <a
-                          href={att.fileUrl}
+                          href={`/api/tickets/${ticketId}/attachments/${att.id}/download`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="fw-semibold text-zen-primary text-decoration-none"
@@ -612,7 +737,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-danger"
-                        onClick={() => setTargetAttachmentToRemove(att)}
+                        onClick={(event) => {
+                          removalDialogOpenerRef.current = event.currentTarget;
+                          setTargetAttachmentToRemove(att);
+                        }}
                       >
                         🗑️ Remove
                       </button>
@@ -667,25 +795,68 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
               </div>
             )}
           </div>
+
+          {/* PUBLIC COMMENTS (I-5) — visible to Requester, IT Staff, and
+              Administrator (BR-04); background matches the page canvas
+              per ui-spec.md §1, distinguishing it from the Internal Notes
+              panel IT Staff sees in I-7. Shared with StaffTicketDetail.tsx
+              (review of PR #68, item 5) — this was previously a verbatim
+              copy-paste of the same panel with its own drifted behavior. */}
+          {commentsLoadError && <div className="alert alert-danger small py-2 mt-4">{commentsLoadError}</div>}
+          <PublicCommentsPanel
+            ticketId={ticketId}
+            comments={comments}
+            onCommentPosted={(created) => setComments((prev) => [...prev, created])}
+          />
+
+          {/* PROBLEM APPEARS RESOLVED (I-5, BR-05) — a Requester may
+              indicate resolution but cannot formally close the ticket;
+              hidden once the ticket has reached a terminal status, and
+              replaced with a confirmation note once used. */}
+          <div className="mt-4 pt-4 border-top">
+            {resolutionSignalError && (
+              <div className="alert alert-danger small py-2 mb-3">{resolutionSignalError}</div>
+            )}
+            {ticket.requesterResolvedAt ? (
+              <p className="text-success small mb-0">
+                ✅ You indicated this problem appears resolved on {formatDate(ticket.requesterResolvedAt)}.
+              </p>
+            ) : (
+              ticket.canSignalResolution && (
+                <button
+                  type="button"
+                  className="btn btn-zen-outline btn-sm"
+                  onClick={handleSignalResolution}
+                  disabled={isSignalingResolution}
+                >
+                  {isSignalingResolution ? 'Recording...' : '✅ Problem Appears Resolved'}
+                </button>
+              )
+            )}
+          </div>
         </div>
       </div>
 
       {/* Soft-Removal Confirmation Modal */}
       {targetAttachmentToRemove && (
         <div
+          ref={removalDialogRef}
           className="modal fade show d-block"
           tabIndex={-1}
           role="dialog"
+          aria-modal="true"
+          aria-labelledby="attachment-removal-title"
           style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(2px)' }}
         >
           <div className="modal-dialog modal-dialog-centered" role="document">
             <div className="modal-content shadow-lg border-0" style={{ borderRadius: '0.75rem' }}>
               <div className="modal-header border-0 bg-danger text-white">
-                <h5 className="modal-title fw-bold">🗑️ Confirm Attachment Removal</h5>
+                <h5 id="attachment-removal-title" className="modal-title fw-bold">🗑️ Confirm Attachment Removal</h5>
                 <button
                   type="button"
                   className="btn-close btn-close-white"
-                  onClick={() => setTargetAttachmentToRemove(null)}
+                  aria-label="Close"
+                  onClick={closeAttachmentRemovalDialog}
                 ></button>
               </div>
               <div className="modal-body p-4">
@@ -711,9 +882,10 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
               </div>
               <div className="modal-footer border-top bg-light">
                 <button
+                  ref={removalCancelButtonRef}
                   type="button"
                   className="btn btn-outline-secondary btn-sm"
-                  onClick={() => setTargetAttachmentToRemove(null)}
+                  onClick={closeAttachmentRemovalDialog}
                 >
                   Cancel
                 </button>
