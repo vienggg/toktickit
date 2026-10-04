@@ -186,6 +186,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
   const isStaleEmptyPage = !isLoading && !error && tickets.length === 0 && !hasActiveFilters && pagination.total > 0;
 
   const showPagination = !isLoading && !error && pagination.total > 0;
+  const visibleTickets = isLoading ? [] : tickets;
 
   return (
     <div className="min-vh-100" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
@@ -314,7 +315,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
         </div>
       )}
 
-      {isLoading && tickets.length === 0 && (
+      {isLoading && (
         <div className="card border-0 shadow-sm">
           <div className="card-body">
             {[...Array(5)].map((_, i) => (
@@ -353,7 +354,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
         </div>
       )}
 
-      {tickets.length > 0 && (
+      {!error && tickets.length > 0 && (
         <div aria-busy={isLoading}>
           {/* Desktop table (>=992px) */}
           <div className="d-none d-lg-block card border-0 shadow-sm">
@@ -386,7 +387,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                   </tr>
                 </thead>
                 <tbody>
-                  {tickets.map((t) => (
+                  {visibleTickets.map((t) => (
                     <tr key={t.id}>
                       <td className="font-monospace" title={t.ticketNumber}>{t.ticketNumber}</td>
                       <td className="small text-muted">{formatDate(t.createdAt)}</td>
@@ -440,7 +441,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                   </tr>
                 </thead>
                 <tbody>
-                  {tickets.map((t) => (
+                  {visibleTickets.map((t) => (
                     <tr key={t.id}>
                       <td className="font-monospace">{t.ticketNumber}</td>
                       <td className="text-truncate" style={{ maxWidth: 200 }}>
@@ -469,7 +470,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
 
           {/* Mobile cards (<768px) */}
           <div className="d-md-none d-flex flex-column gap-2">
-            {tickets.map((t) => (
+            {visibleTickets.map((t) => (
               <Link
                 key={t.id}
                 to={`/staff/tickets/${t.id}`}

@@ -177,6 +177,32 @@ describe('IT Staff Ticket Queue (UI-03, UI-04, UI-05)', () => {
     expect(screen.getAllByTestId('ticket-card').length).toBeGreaterThan(0);
   });
 
+  it('UI-03g: hides the previous rows while a new filter loads and if that request fails', async () => {
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText(baseTicket.ticketNumber).length).toBeGreaterThan(0));
+
+    let resolveRequest!: (response: Response) => void;
+    const delayedFailure = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      String(url).includes('status=CLOSED') ? delayedFailure : mockFetchImpl(url)
+    );
+
+    fireEvent.change(screen.getByLabelText('STATUS'), { target: { value: 'CLOSED' } });
+    await waitFor(() => expect(screen.getAllByTestId('skeleton-row')).toHaveLength(5));
+    expect(screen.queryByText(baseTicket.ticketNumber)).not.toBeInTheDocument();
+
+    resolveRequest({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: { message: 'Queue unavailable' } }),
+    } as Response);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Queue unavailable');
+    expect(screen.queryByText(baseTicket.ticketNumber)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+  });
+
   it('UI-05: mobile ticket cards are keyboard-operable links', async () => {
     const user = userEvent.setup();
     renderQueueWithDetailRoute();

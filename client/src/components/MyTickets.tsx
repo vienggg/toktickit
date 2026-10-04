@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiFetch, parseApiError } from '../api';
 import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, formatDate } from '../hooks/usePaginatedFetch';
+import { TicketStatusBadge } from './TicketStatusBadge';
 
 export interface TicketSummaryItem {
   id: number;
@@ -9,7 +10,7 @@ export interface TicketSummaryItem {
   summary: string;
   description: string;
   priority: 'Low' | 'Medium' | 'High' | 'Urgent';
-  status: 'New' | 'In Progress' | 'Resolved' | 'Closed';
+  status: string;
   categoryId: number;
   category: { id: number; name: string };
   relatedSystemId?: number | null;
@@ -112,21 +113,6 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
         return <span className="badge bg-info text-dark">🟡 Medium</span>;
       default:
         return <span className="badge bg-secondary">🟢 Low</span>;
-    }
-  };
-
-  const getStatusBadge = (s: string) => {
-    switch (s) {
-      case 'New':
-        return <span className="badge bg-primary">New</span>;
-      case 'In Progress':
-        return <span className="badge bg-warning text-dark">In Progress</span>;
-      case 'Resolved':
-        return <span className="badge bg-success">Resolved</span>;
-      case 'Closed':
-        return <span className="badge bg-dark">Closed</span>;
-      default:
-        return <span className="badge bg-light text-dark border">{s}</span>;
     }
   };
 
@@ -397,7 +383,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
                         <span className="small text-muted">{t.relatedSystem?.name || '—'}</span>
                       </td>
                       <td>{getPriorityBadge(t.priority)}</td>
-                      <td>{getStatusBadge(t.status)}</td>
+                      <td><TicketStatusBadge status={t.status} /></td>
                       <td className="small text-muted">{formatDate(t.createdAt)}</td>
                       <td className="text-end pe-4" onClick={(e) => e.stopPropagation()}>
                         <button

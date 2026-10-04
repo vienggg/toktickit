@@ -75,8 +75,9 @@ Security/Authorization · Migration/Regression · End-to-End.
 | API-29 | API | AC-13, BR-28 (added in review of PR #69 — item 1: TOCTOU race in the last-Administrator count-then-write) | Last-Administrator protection under real concurrency | Two concurrent PATCHes, each deactivating the other of exactly two active Administrators, via `Promise.all`: exactly one succeeds (200), the other is rejected (403 LAST_ADMINISTRATOR), and a fresh DB count immediately after confirms at least one active Administrator remains | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | API-30 | API | AC-12, BR-27 vs BR-26 (added in review of PR #69 — item 4: ordering) | Self-modification check precedes duplicate-email check | A self-deactivation attempt whose body also collides on another user's email returns 403 SELF_MODIFICATION_BLOCKED, not 409 DUPLICATE_EMAIL | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
 | API-31 | API | BR-26 (added in review of PR #69 — item 5: app-level email pre-check races the DB unique constraint) | Duplicate-email race on create | Two concurrent `POST /api/admin/users` with the same email via `Promise.all`: one succeeds (201), the other returns 409 DUPLICATE_EMAIL (not a 500), and only one row is created | `server/tests/lab-03/users-admin.api.test.ts` | Pass |
-| REGR-01 | Migration/Regression | BR-30, BR-31, AC-16 | Row-count and FK integrity before/after migration | Category/RequesterUser→User/RelatedSystem/Ticket/Attachment counts unchanged; every requesterId still resolves | `server/tests/lab-03/migration-regression.api.test.ts` | |
-| REGR-02 | Migration/Regression | FR-10 | All Lab 1/2 endpoints still function under cookie auth | Every Lab 2 API test passes after rewriting from `?requesterId=` to session auth | `server/tests/lab-03/migration-regression.api.test.ts` | |
+| SEED-01 | Manual code review | BR-02, BR-30 | Existing-user seed upsert behavior (reviewed on PR #71) | The Requester `update: {}` branch preserves user edits on rerun; every `create` branch still sets the initial password and `mustChangePassword: true` | `server/prisma/seed.ts` | Reviewed in code; not an automated seed-rerun test |
+| REGR-01 | Migration/Regression | BR-30, BR-31, AC-16 | Baseline row floors and FK integrity after migration | Each evolved table has at least its pre-Lab-3 row count; no orphaned requesterId, original accounts retained, enum fields non-null, hashes non-plaintext. Exact before/after identity was checked manually during I-2 | `server/tests/lab-03/migration-regression.api.test.ts` | Pass (five automated checks plus I-2 manual check) |
+| REGR-02 | Migration/Regression | FR-10 | Lab 1/2 endpoints still function under cookie auth | Rewritten Lab 2 API tests pass with session auth; Lab 1 categories/systems/health tests remain green | `server/tests/lab-01/`, `server/tests/lab-02/` | Pass |
 
 ## Client Tests — `client/tests/lab-03/`
 
@@ -85,16 +86,17 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-01 | UI Component | AC-01, AC-05 | Login form | Valid submit calls API and redirects; invalid shows generic error; busy state disables button | `client/tests/lab-03/Login.test.tsx` | Pass |
 | UI-02 | UI Component | AC-02, BR-09, BR-11 | Change Password form | Validates policy and confirmation client-side; submits and redirects on success | `client/tests/lab-03/ChangePassword.test.tsx` | Pass |
 | UI-03 | UI Component | FR-14 | Staff Queue rendering | Renders rows with correct badges; empty and no-results states render correctly | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
-| UI-04 | UI Style | §1 (ui-spec) | Status/role badge colors | Correct token applied per status/role value; owner name vs. Unassigned pill | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
+| UI-04 | UI Component | §1 (ui-spec) | Queue badges and Owner display | Status/priority badge markup and owner name vs. Unassigned label render; actual computed status/role colors are verified by VIS-01 in Chromium | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
 | UI-05 | Responsive | §9 (ui-spec) | Queue table → card collapse | Card layout markup present alongside the desktop table (Bootstrap breakpoint classes; jsdom does not evaluate CSS media queries, so this asserts markup, not computed layout) | `client/tests/lab-03/StaffTicketQueue.test.tsx` | Pass |
 | UI-03e | UI Component | FR-14 (added in review of PR #67 — item 1: "Open" navigated to a route App.tsx never defines, and no test caught it; **superseded in I-7**, which built that route; wording corrected in review of PR #68 — item 3: the I-6 modal was fully deleted, not preserved) | Queue "Open" action | Clicking a row's Open button navigates to the real `/staff/tickets/:id` Staff Ticket Detail screen (I-7). The I-6 read-only modal (`TicketDetailModal`) no longer exists at all; `onOpenTicket` is a bare optional callback that receives the clicked ticket id and renders nothing itself — a caller that passes it must build its own UI | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-1) | Pass |
 | UI-03f | UI Component | AC-18 (added in review of PR #67 — item 2: Owner filter only offered All/Unassigned) | Queue Owner picker | Picker is populated from `GET /api/staff/members`; selecting a specific staff member sends the matching `ownerId` query param | `client/tests/lab-03/StaffTicketQueue.test.tsx` (item-2) | Pass |
+| UI-03g | UI Component | FR-14 (added in review of PR #71 — old queue rows remained clickable while a new filtered request loaded or failed) | Staff Queue reload/error state | Previous rows and Open actions disappear during reload and after a failed fetch; skeleton then error message appear instead | `client/tests/lab-03/StaffTicketQueue.test.tsx` (UI-03g) | Pass |
 | UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | UI-10 | UI Component | FR-20 (added in review of PR #69 — item 9: no client test exercised RequireRole on a route this sensitive) | RequireRole guard on `/admin/users` | IT_STAFF and REQUESTER users are redirected away from `/admin/users` instead of it rendering; an ADMINISTRATOR user renders it normally | `client/tests/lab-03/ProtectedRoute.test.tsx` | Pass |
-| UI-11 | UI Resilience | Defensive rendering for API status values | Unknown status badge fallback | Known statuses use their mapped palette; unrecognized values (including prototype property names) use the neutral fallback without throwing | `client/tests/lab-03/TicketStatusBadge.test.tsx` | Pass |
+| UI-11 | UI Resilience | Defensive rendering for API status values | Shared status badge on staff and Requester screens | All eight current statuses and five Lab 2 spellings map to the correct palette and preserve `data-status`; unknown values (including prototype property names) use the neutral fallback | `client/tests/lab-03/TicketStatusBadge.test.tsx` | Pass |
 
 ## End-to-End Tests — `e2e/lab-03/` (Playwright)
 
@@ -104,17 +106,16 @@ Security/Authorization · Migration/Regression · End-to-End.
 | E2E-02 | E2E | AC-02 | Initial password login and change | Normal app opens only after a valid password change | `e2e/lab-03/authentication.spec.ts` | Pass |
 | E2E-03 | E2E | FR-14–FR-19 | Full staff workflow | Queue → open Ticket → claim (asserted visible and clicked unconditionally, then owner-select value confirmed to change — not merely that the Claim button disappeared; corrected in review of PR #70, item 2) → set IT Priority → change status → post comment → post note | `e2e/lab-03/staff-ticket-flow.spec.ts` | Pass |
 | E2E-04 | E2E | FR-20–FR-23 | Full admin workflow | Create user → set initial password → that user's forced change at next login | `e2e/lab-03/user-administration.spec.ts` | Pass |
+| VIS-01 | UI Style | `ui-spec.md` §1, §10 | Status and role badge palettes | All eight status colors and all three role badge backgrounds match their declared tokens | `e2e/lab-03/visual-inspection.spec.ts` (palette and role-specific shell) | Pass |
+| VIS-02 | Responsive | `ui-spec.md` §9–§10 | Responsive layout and clipping | Staff Queue fits its scroll region at 375/768/1024/1280px; Lab 3 screens have no page-level overflow at 375px; long status text fits its badge at 992px; mobile cards fit the viewport | `e2e/lab-03/visual-inspection.spec.ts` (responsive/overflow/mobile cards/992px status) | Pass |
+| VIS-03 | Accessibility | `ui-spec.md` §10 | Keyboard focus across roles and screen sizes | Every listed visible enabled Tab stop is reachable and has a visible focus indicator; attachment and administrator dialogs trap focus and support Escape/focus return | `e2e/lab-03/visual-inspection.spec.ts` (focus sweeps and dialog tests) | Pass |
+| VIS-04 | UI Style | `ui-spec.md` §10 | Form and information presentation | Queue Unassigned label vs detail Owner selector, public/internal panel backgrounds, read-only vs editable priority, and validation placement match the checklist | `e2e/lab-03/visual-inspection.spec.ts` (owner/panels/priority/validation) | Pass |
+| VIS-05 | Security/UI | `ui-spec.md` §10, §6 matrix | Forbidden and not-found states | Staff cannot view admin route; unauthenticated direct navigation redirects to Login; missing ticket shows styled error | `e2e/lab-03/visual-inspection.spec.ts` (forbidden/not-found) | Pass |
+| VIS-06 | Accessibility | `ui-spec.md` §10 | Keyboard activation | Sortable queue headers and mobile ticket cards respond to keyboard activation | `e2e/lab-03/visual-inspection.spec.ts` (keyboard sorting/mobile cards) | Pass |
 
-`e2e/lab-03/visual-inspection.spec.ts` additionally backs the §10 Visual
-Inspection Checklist items in `ui-spec.md` with programmatic Playwright
-assertions (responsive overflow at every breakpoint for the Staff Queue and
-across all Lab 3 screens at 375px, all status colors, role-specific navigation,
-validation placement, Owner-control distinction, panel contrast,
-editable-vs-read-only controls, keyboard sorting, a Tab-order/focus-indicator
-sweep across all authenticated role screens and responsive variants, keyboard
-attachment selection/removal-dialog behavior, forbidden states, and mobile
-clipping) rather than duplicating an E2E ID — it is supporting evidence for
-the checklist, not a new end-to-end scenario.
+The 23 tests in `e2e/lab-03/visual-inspection.spec.ts` are grouped under
+VIS-01–VIS-06 by the specific checklist property they verify. They support
+the visual inspection record as well as the four end-to-end workflows above.
 
 ---
 
@@ -144,7 +145,7 @@ and a re-run of the same request confirming it.
 
 Captured via `e2e/lab-03/capture.ts` (see `sprint-plan.md` §3). Folders exactly
 as required: `artifacts/lab-03/screenshots/{authentication,staff-queue,staff-ticket-detail,user-management}/`,
-no 5th folder. The latest full Lab 3 browser run passed 29/29 tests; the
+no 5th folder. The latest full Lab 3 browser run passed 30/30 tests; the
 manifest below lists the checked-in evidence captures. User-management
 screenshots capture the responsive viewport rather than full-page content,
 so retained E2E fixture accounts do not make those images grow on each run:
@@ -159,6 +160,16 @@ before this whole suite runs. This is independent of the server's own
 vitest suite ever having run against the same database — a fresh clone that
 only migrates, seeds, and starts the dev servers now provisions these
 accounts itself before the first spec's `login()` call.
+
+The eight-status palette test also requires at least one ticket in each
+TicketStatus state. `server/prisma/seed.ts` supplies that status distribution;
+the test fails if a filtered state has no badge, rather than silently
+skipping a missing status.
+
+The user-list evidence capture applies the IT Staff role filter and searches
+for the seeded Carlos Mendez account. This keeps the screenshot representative
+of the real UI while avoiding accumulated throwaway accounts from test runs;
+the filters are cleared before the Create/Edit User workflow continues.
 
 ```
 artifacts/lab-03/screenshots/authentication/Figure-after-logout@desktop.png
@@ -226,9 +237,8 @@ prisma migrate resolve --rolled-back` — a bookkeeping-only fix, no schema or
 data change. All 99 server tests, including the 17 in
 `staff-queue.api.test.ts`, then passed.
 
-REGR-01 asserts these counts are unchanged after the full `0_init` →
-`4_add_comments_and_notes` migration sequence, and that every `Ticket.requesterId`
-still resolves to the same `User` row it referenced as a `RequesterUser`.
-Verified manually during I-2 (all 15 tickets and 5 attachments preserved,
-zero NULLs introduced by the enum conversion) and asserted automatically by
-`server/tests/lab-03/migration-regression.api.test.ts`.
+REGR-01 automatically checks that current counts are at least these baseline
+counts, no `Ticket.requesterId` is orphaned, the original accounts remain,
+and no enum conversion introduced NULL values. It does not compare exact
+ticket IDs to a pre-migration snapshot. That stronger identity check was
+performed manually during I-2 (all 15 tickets and 5 attachments preserved).

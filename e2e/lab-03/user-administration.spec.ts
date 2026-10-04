@@ -13,10 +13,20 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     await page.goto("/admin/users");
     await expect(page.getByRole("heading", { name: /administrator user management/i })).toBeVisible();
 
-    // Keep these captures to the responsive viewport. The live test database
-    // retains unique E2E users across runs, so full-page captures would grow
-    // without bound and obscure the actual list layout.
+    // A known seeded account keeps the evidence readable even when the
+    // development database has accumulated throwaway accounts from tests.
+    // This also demonstrates the role and search filters working together.
+    await page.locator("#role-filter").selectOption("IT_STAFF");
+    await page.locator("#user-search").fill("carlos.mendez@toktick.internal");
+    await expect(page.locator(".d-none.d-md-block tbody tr").filter({ hasText: "carlos.mendez@toktick.internal" })).toHaveCount(1);
     await shoot(page, "user-management", "Figure-user-list", "all", { fullPage: false });
+    const seededRow = page.locator(".d-none.d-md-block tr", { hasText: "carlos.mendez@toktick.internal" }).first();
+    await seededRow.getByRole("button", { name: /^edit$/i }).click();
+    await expect(page.getByRole("heading", { name: /^edit user$/i })).toBeVisible();
+    await shoot(page, "user-management", "Figure-edit-user-modal", "all", { fullPage: false });
+    await page.locator(".modal-footer button", { hasText: "Close" }).click();
+    await page.locator("#user-search").fill("");
+    await page.locator("#role-filter").selectOption("All");
 
     // Create User modal. shoot(..., "all") restores whatever viewport it
     // was called at (review of PR #70, item 3), so no manual reset is
@@ -50,7 +60,6 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     const row = page.locator(".d-none.d-md-block tr", { hasText: newUserEmail }).first();
     await row.getByRole("button", { name: /^edit$/i }).click();
     await expect(page.getByRole("heading", { name: /^edit user$/i })).toBeVisible();
-    await shoot(page, "user-management", "Figure-edit-user-modal", "all", { fullPage: false });
     // The modal footer's "Close" button and its header's little X
     // (btn-close, aria-label "Close") both match a role+name query for
     // "Close" — scope to the footer button specifically by its class.
