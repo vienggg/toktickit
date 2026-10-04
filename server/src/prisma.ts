@@ -9,7 +9,7 @@ export function getPrisma(): PrismaClient {
   if (!client) {
     const dbUrl =
       process.env.DATABASE_URL ||
-      "postgresql://toktickit:toktickit@172.26.27.122:5432/toktickit?schema=public";
+      "postgresql://toktickit:toktickit@localhost:5432/toktickit?schema=public";
     client = new PrismaClient({
       datasources: {
         db: {

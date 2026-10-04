@@ -47,6 +47,29 @@ npm run dev
 ```
 The React dev server will run on `http://localhost:5173`.
 
+### 3. Database Note (local, non-Docker development)
+`server/.env`'s `DATABASE_URL` points at `localhost:5432`, so local development
+expects a Postgres 16 server reachable there (this machine runs one inside a
+WSL Ubuntu distro). **If you also run `docker compose up`, its `db` service
+publishes host port 5433, not 5432** — deliberately, to avoid colliding with a
+locally-installed Postgres. `docker compose`'s internal service-to-service
+traffic (`server` → `db:5432`) is unaffected either way; this only matters if
+you want to connect a host tool (psql, a GUI client) directly to one or the
+other.
+
+### 4. Seeded Accounts (local development only)
+```bash
+cd server
+npx prisma migrate deploy
+npx tsx prisma/seed.ts
+```
+Every seeded account (Requester, IT Staff, and Administrator) shares the
+initial password **`ChangeMe123!`** and is forced through the mandatory
+Change Password flow at first login. This is not a real secret — never reuse
+it outside local development. The seed script is idempotent: it upserts
+users/categories/systems and skips any ticket whose number already exists, so
+re-running it never deletes real data created through the app.
+
 ---
 
 ## 🧪 Running Tests

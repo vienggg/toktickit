@@ -1,12 +1,102 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import { hashPassword, verifyPassword, meetsPasswordPolicy } from "./utils/password.js";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
-import { Prisma } from "@prisma/client";
+import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
+import { getPermittedTransitions, getPermittedTransitionsForTicket, isLegalTransition } from "./utils/statusTransitions.js";
+import {
+  requireAuth,
+  requirePasswordChanged,
+  requireRole,
+  issueSessionCookie,
+  clearSessionCookie,
+} from "./auth.js";
+
+// Lab 3 introduced TicketStatus/Priority as native Prisma enums (uppercase,
+// underscore-separated). The Lab 2 client still sends legacy casing
+// ("New", "In Progress", "High") until it is reworked in I-4; these
+// normalizers keep both old and new client requests working against the
+// new enum columns without changing observable Lab 2 behavior.
+function normalizeStatus(value: string): TicketStatus | undefined {
+  const key = value.trim().toUpperCase().replace(/\s+/g, "_");
+  return (Object.values(TicketStatus) as string[]).includes(key) ? (key as TicketStatus) : undefined;
+}
+function normalizePriority(value: string): Priority | undefined {
+  const key = value.trim().toUpperCase();
+  return (Object.values(Priority) as string[]).includes(key) ? (key as Priority) : undefined;
+}
+
+// Reverse mapping back to the exact casing Lab 2 established, for the 4
+// status/priority values that already existed pre-Lab-3. The 4 new
+// statuses (OPEN, WAITING_FOR_REQUESTER, REOPENED, CANCELLED) have no
+// legacy equivalent and pass through unchanged — no Lab 2 contract ever
+// covered them, and this Requester-facing endpoint is fully reworked in I-4.
+const LEGACY_STATUS: Partial<Record<TicketStatus, string>> = {
+  NEW: "New",
+  IN_PROGRESS: "In_Progress",
+  RESOLVED: "Resolved",
+  CLOSED: "Closed",
+};
+const LEGACY_PRIORITY: Record<Priority, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  URGENT: "Urgent",
+};
+
+// BR-05, D-10: statuses where "Problem Appears Resolved" no longer applies.
+// Single source of truth, referenced both by the resolution-signal route's
+// own 409 check and by serializeTicket's canSignalResolution flag below.
+// Fixed in review (PR #66): the client previously duplicated this list
+// independently (with dead entries, since two of the four raw enum values
+// can never actually reach it — see LEGACY_STATUS above), so a future
+// change here would silently stop matching the client's copy. The client
+// now reads canSignalResolution directly instead of recomputing it.
+const RESOLUTION_SIGNAL_BLOCKED_STATUSES: TicketStatus[] = [
+  TicketStatus.RESOLVED,
+  TicketStatus.CLOSED,
+  TicketStatus.CANCELLED,
+];
+
+// Found while capturing Part 7 curl evidence for I-7: every `include:
+// { requester: true }` below fetches the FULL User row — including
+// `passwordHash` — into the ticket object, which every serializer then
+// spreads verbatim into the JSON response. For the Requester-facing routes
+// this leaked a user's own hash back to themselves; for the new I-7 staff
+// routes it leaked ANY requester's hash to ANY IT Staff/Administrator, a
+// materially worse exposure. Pre-existing since I-2, surfaced now rather
+// than left for I-8. Fixed by selecting only the fields any response
+// actually renders, everywhere a ticket's requester is included.
+const SAFE_REQUESTER_SELECT = { id: true, name: true, email: true, department: true } as const;
+
+// Item 10 in review of PR #68: the `{ id, name }` owner projection was
+// repeated ad hoc in three places (staff queue, staff detail, and the
+// staff-detail update handlers) instead of being named like
+// SAFE_REQUESTER_SELECT above for the analogous requester projection.
+const STAFF_OWNER_SELECT = { id: true, name: true } as const;
+
+// The Prisma field is `requestedPriority` (Lab 3), but the Lab 2 client and
+// its existing tests still read `priority` (Title-Case) and `status`
+// (Title-Case/underscore) from API responses. This keeps the wire contract
+// unchanged until I-4 reworks the client/tests together; I-2's scope is
+// the data model only.
+function serializeTicket<T extends { requestedPriority: Priority; status: TicketStatus; requesterResolvedAt?: Date | null }>(
+  ticket: T
+): Omit<T, "requestedPriority" | "status"> & { priority: string; status: string; canSignalResolution: boolean } {
+  const { requestedPriority, status, ...rest } = ticket;
+  return {
+    ...rest,
+    priority: LEGACY_PRIORITY[requestedPriority],
+    status: LEGACY_STATUS[status] ?? status,
+    canSignalResolution: !RESOLUTION_SIGNAL_BLOCKED_STATUSES.includes(status) && !ticket.requesterResolvedAt,
+  };
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,9 +153,25 @@ const upload = multer({
 
 export const app = express();
 
-app.use(cors());
+// credentials: true is required for the httpOnly session cookie (D-01) to
+// be sent/received cross-origin; wildcard "*" origin is not permitted by
+// browsers when credentials are enabled, so the client origin is read from
+// an env var with a sane local-dev default.
+app.use(
+  cors({
+    origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+    credentials: true,
+  })
+);
 app.use(express.json());
-app.use("/uploads", express.static(uploadsDir));
+app.use(cookieParser());
+// Deliberately NOT mounting express.static(uploadsDir) at a public path.
+// Fixed in review: an unauthenticated static mount here would let anyone
+// who has ever seen a fileUrl (network tab, cache, shared link) fetch it
+// directly with no ownership check and no 410 for removed attachments —
+// exactly the gap GET /api/tickets/:id/attachments/:attachmentId/download
+// exists to close. Attachments are served exclusively through that
+// authenticated, ownership-checked route.
 
 app.get("/", (_req: Request, res: Response) => {
   res.json({
@@ -73,9 +179,9 @@ app.get("/", (_req: Request, res: Response) => {
     frontend: "http://localhost:5173",
     endpoints: {
       health: "/api/health",
+      auth: "/api/auth/login",
       categories: "/api/categories",
       systems: "/api/systems",
-      devRequesters: "/api/dev/requesters",
       tickets: "/api/tickets",
     },
   });
@@ -88,7 +194,138 @@ app.get("/api/health", (_req: Request, res: Response) => {
   res.status(200).json({ status: "ok", service: "TokTickIT API" });
 });
 
-app.get("/api/categories", async (_req: Request, res: Response) => {
+// ---------------------------------------------------------------------------
+// Lab 3 — Authentication (I-3)
+// ---------------------------------------------------------------------------
+
+// BR-06: an invalid email/password combination always returns this exact
+// generic message, whether or not the email exists — never leak which
+// field was wrong or whether the account exists.
+const INVALID_CREDENTIALS_RESPONSE = {
+  error: { code: "INVALID_CREDENTIALS", message: "Invalid email or password." },
+};
+
+function safeUser(user: { id: number; name: string; email: string; role: string; department: string; mustChangePassword: boolean }) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    department: user.department,
+    mustChangePassword: user.mustChangePassword,
+  };
+}
+
+app.post("/api/auth/login", async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body ?? {};
+    if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
+      return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Email and password are required." } });
+    }
+
+    // BR-01, BR-06: email comparison is case-insensitive; a non-existent
+    // email and a wrong password produce the identical response.
+    const user = await getPrisma().user.findFirst({
+      where: { email: { equals: email.trim(), mode: "insensitive" } },
+    });
+    if (!user) {
+      return res.status(401).json(INVALID_CREDENTIALS_RESPONSE);
+    }
+
+    const passwordMatches = verifyPassword(password, user.passwordHash);
+    if (!passwordMatches) {
+      return res.status(401).json(INVALID_CREDENTIALS_RESPONSE);
+    }
+
+    // BR-07: only reveal deactivation *after* the password has already
+    // proven the account exists — never before, and never for a wrong
+    // password against an inactive account (that case still returns the
+    // generic 401 above, indistinguishable from a wrong password on an
+    // active account).
+    if (!user.isActive) {
+      return res.status(403).json({ error: { code: "ACCOUNT_INACTIVE", message: "This account has been deactivated." } });
+    }
+
+    await getPrisma().user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    issueSessionCookie(res, user.id);
+    return res.status(200).json({ user: safeUser(user) });
+  } catch (err) {
+    return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to log in right now." } });
+  }
+});
+
+// BR-08: idempotent — clearing an already-cleared/absent cookie still
+// succeeds. requireAuth is deliberately NOT applied here: logging out
+// while already logged out (or with an expired token) must not itself
+// require a valid session.
+app.post("/api/auth/logout", (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  return res.status(204).send();
+});
+
+app.get("/api/auth/me", requireAuth, (req: Request, res: Response) => {
+  // req.authUser is guaranteed by requireAuth; requirePasswordChanged is
+  // deliberately not applied to this route (it's on the allowlist) so the
+  // client can always learn its own mustChangePassword state.
+  return res.status(200).json({ user: req.authUser });
+});
+
+app.post("/api/auth/change-password", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
+    if (
+      typeof currentPassword !== "string" ||
+      typeof newPassword !== "string" ||
+      typeof confirmPassword !== "string"
+    ) {
+      return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "All password fields are required." } });
+    }
+
+    // BR-09: at least 8 characters, at least one letter and one digit.
+    const meetsPolicy = newPassword.length >= 8 && /[A-Za-z]/.test(newPassword) && /\d/.test(newPassword);
+    if (!meetsPolicy) {
+      return res.status(400).json({
+        error: { code: "WEAK_PASSWORD", message: "Password must be at least 8 characters and include a letter and a digit." },
+      });
+    }
+    // BR-11: confirmation must match exactly.
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: { code: "PASSWORD_MISMATCH", message: "New password and confirmation do not match." } });
+    }
+
+    const user = await getPrisma().user.findUnique({ where: { id: req.authUser!.id } });
+    if (!user) {
+      return res.status(401).json({ error: { code: "UNAUTHENTICATED", message: "Login required." } });
+    }
+
+    if (!verifyPassword(currentPassword, user.passwordHash)) {
+      return res.status(400).json({ error: { code: "INVALID_CURRENT_PASSWORD", message: "Current password is incorrect." } });
+    }
+    // BR-10: on a forced change, the new password must differ from the
+    // initial one (a user cannot "change" their password to itself and
+    // remain stuck in the mustChangePassword state).
+    if (verifyPassword(newPassword, user.passwordHash)) {
+      return res.status(400).json({ error: { code: "PASSWORD_UNCHANGED", message: "New password must be different from your current password." } });
+    }
+
+    const newHash = hashPassword(newPassword);
+    const updated = await getPrisma().user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash, mustChangePassword: false },
+    });
+
+    return res.status(200).json({ user: safeUser(updated) });
+  } catch (err) {
+    return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to change password right now." } });
+  }
+});
+
+// Note: GET /api/dev/requesters (the Development Requester selector) is
+// removed in I-4 — real authentication replaces it entirely (per the
+// handout §8.2 and specification.md scope). Its test file is removed
+// alongside it.
+
+app.get("/api/categories", requireAuth, requirePasswordChanged, async (_req: Request, res: Response) => {
   try {
     const categories = await getPrisma().category.findMany({
       orderBy: { id: "asc" },
@@ -100,7 +337,7 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/systems", async (_req: Request, res: Response) => {
+app.get("/api/systems", requireAuth, requirePasswordChanged, async (_req: Request, res: Response) => {
   try {
     const systems = await getPrisma().relatedSystem.findMany({
       where: { isActive: true },
@@ -113,49 +350,22 @@ app.get("/api/systems", async (_req: Request, res: Response) => {
   }
 });
 
-app.get("/api/dev/requesters", async (_req: Request, res: Response) => {
-  try {
-    const activeRequesters = await getPrisma().requesterUser.findMany({
-      where: { isActive: true },
-      orderBy: { id: "asc" },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        department: true,
-        isActive: true,
-        createdAt: true,
-      },
-    });
-    res.status(200).json(activeRequesters);
-  } catch (err) {
-    res.status(500).json({ error: "Failed to fetch development requesters" });
-  }
-});
-
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 5: My Tickets Search, Filter, Sort, and Pagination (GET /api/tickets)
+// Lab 3 (I-4): ownership comes from the authenticated session (BR-03), never
+// from a client-supplied requesterId.
 // ---------------------------------------------------------------------------
-app.get("/api/tickets", async (req: Request, res: Response) => {
+app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request, res: Response) => {
   try {
-    const { requesterId, search, status, categoryId, priority, sort, page, limit } =
-      req.query;
-
-    if (!requesterId) {
-      return res.status(400).json({ error: "requesterId query parameter is required" });
-    }
-
-    const parsedRequesterId = parseInt(String(requesterId), 10);
-    if (isNaN(parsedRequesterId)) {
-      return res.status(400).json({ error: "requesterId must be a valid integer" });
-    }
+    const { search, status, categoryId, priority, sort, page, limit } = req.query;
 
     const where: Prisma.TicketWhereInput = {
-      requesterId: parsedRequesterId,
+      requesterId: req.authUser!.id,
     };
 
     if (status && status !== "All") {
-      where.status = String(status);
+      const normalized = normalizeStatus(String(status));
+      if (normalized) where.status = normalized;
     }
 
     if (categoryId && categoryId !== "All") {
@@ -166,7 +376,8 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     }
 
     if (priority && priority !== "All") {
-      where.priority = String(priority);
+      const normalized = normalizePriority(String(priority));
+      if (normalized) where.requestedPriority = normalized;
     }
 
     if (search && typeof search === "string" && search.trim().length > 0) {
@@ -181,8 +392,12 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     if (sort && typeof sort === "string") {
       const [field, direction] = sort.split(":");
       const dir: Prisma.SortOrder = direction === "asc" ? "asc" : "desc";
-      if (field === "createdAt" || field === "updatedAt" || field === "priority" || field === "status") {
+      if (field === "createdAt" || field === "updatedAt" || field === "status") {
         orderBy = { [field]: dir };
+      } else if (field === "priority") {
+        // Client-facing sort key stays "priority"; the underlying Prisma
+        // field is "requestedPriority" (D-09).
+        orderBy = { requestedPriority: dir };
       }
     }
 
@@ -190,28 +405,25 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
     const take = Math.min(50, Math.max(1, parseInt(String(limit || 10), 10) || 10));
     const skip = (pageNum - 1) * take;
 
-    const [totalItems, tickets] = await Promise.all([
-      getPrisma().ticket.count({ where }),
-      getPrisma().ticket.findMany({
-        where,
-        orderBy,
-        skip,
-        take,
-        include: {
-          category: true,
-          relatedSystem: true,
-          requester: true,
-          attachments: {
-            where: { isRemoved: false },
-          },
+    const { total: totalItems, rows: tickets } = await fetchPaginatedTickets<Parameters<typeof serializeTicket>[0]>({
+      where,
+      orderBy,
+      skip,
+      take,
+      include: {
+        category: true,
+        relatedSystem: true,
+        requester: { select: SAFE_REQUESTER_SELECT },
+        attachments: {
+          where: { isRemoved: false },
         },
-      }),
-    ]);
+      },
+    });
 
     const totalPages = Math.ceil(totalItems / take) || 1;
 
     return res.status(200).json({
-      tickets,
+      tickets: tickets.map(serializeTicket),
       pagination: {
         page: pageNum,
         limit: take,
@@ -230,58 +442,128 @@ app.get("/api/tickets", async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 6: Ticket Detail, Attachment Lifecycle, and Edit Mode
 // ---------------------------------------------------------------------------
-app.get("/api/tickets/:id", async (req: Request, res: Response) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid ticket ID" });
-    }
+// Strict integer parsing for route params. Fixed in review (PR #66):
+// parseInt("5abc", 10) === 5, silently accepting trailing garbage instead
+// of rejecting a malformed ID. Applied to every :id/:attachmentId param in
+// this file, not just the new I-5 routes the review was looking at.
+function parseStrictId(raw: string | undefined): number | null {
+  if (raw === undefined || !/^\d+$/.test(raw)) return null;
+  const id = parseInt(raw, 10);
+  return Number.isSafeInteger(id) ? id : null;
+}
 
-    const ticket = await getPrisma().ticket.findUnique({
-      where: { id },
-      include: {
-        category: true,
-        relatedSystem: true,
-        requester: true,
-        attachments: {
-          where: { isRemoved: false },
-          orderBy: { id: "asc" },
+// BR-32: a Requester requesting another Requester's Ticket gets 404, not
+// 403 — the response must not confirm the Ticket exists at all. This is a
+// deliberate exception to using 403 for authorization failures elsewhere.
+//
+// This is the SINGLE canonical implementation of that 404-masking response
+// for every Ticket-scoped route below (fixed in review of PR #66, which
+// had reintroduced a second, independent copy of this same masking logic
+// for the I-5 comments/resolution routes — a future fix to the rule
+// applied to one would not have automatically applied to the other).
+// Different routes need different authorization rules (strict Requester
+// ownership vs. Requester-owns-or-is-staff visibility) and different
+// amounts of ticket detail, so this is a shared core parameterized by
+// both, not a single fetch-everything function.
+async function fetchAuthorizedTicketOr404<T extends { requesterId: number }>(
+  res: Response,
+  fetchTicket: () => Promise<T | null>,
+  isAuthorized: (ticket: T) => boolean
+): Promise<T | null> {
+  const ticket = await fetchTicket();
+  if (!ticket || !isAuthorized(ticket)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    return null;
+  }
+  return ticket;
+}
+
+// Full detail (category/relatedSystem/requester/attachments) for GET/PATCH,
+// which return this shape directly to the client.
+async function findOwnedTicketOr404(res: Response, id: number, requesterId: number) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () =>
+      getPrisma().ticket.findUnique({
+        where: { id },
+        include: {
+          category: true,
+          relatedSystem: true,
+          requester: { select: SAFE_REQUESTER_SELECT },
+          attachments: { where: { isRemoved: false }, orderBy: { id: "asc" } },
         },
-      },
-    });
+      }),
+    (ticket) => ticket.requesterId === requesterId
+  );
+}
 
-    if (!ticket) {
-      return res.status(404).json({ error: "Ticket not found" });
+// Same strict-ownership rule, no joins — for routes that only need
+// id/status (the resolution signal). Fixed in review: this previously
+// reused findOwnedTicketOr404's full-include query for a handler that
+// only reads two scalar fields.
+async function findOwnedTicketLightOr404(res: Response, id: number, requesterId: number) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () => getPrisma().ticket.findUnique({ where: { id } }),
+    (ticket) => ticket.requesterId === requesterId
+  );
+}
+
+type OwnedTicket = NonNullable<Awaited<ReturnType<typeof findOwnedTicketOr404>>>;
+type OwnedTicketLight = NonNullable<Awaited<ReturnType<typeof findOwnedTicketLightOr404>>>;
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** Set by requireOwnedTicketParam once ownership is confirmed. */
+      ownedTicket?: OwnedTicket;
+      /** Set by requireOwnedTicketParamLight once ownership is confirmed. */
+      ownedTicketLight?: OwnedTicketLight;
     }
+  }
+}
 
-    const requesterId = req.query.requesterId ? parseInt(String(req.query.requesterId), 10) : undefined;
-    if (requesterId !== undefined && !isNaN(requesterId) && ticket.requesterId !== requesterId) {
-      return res.status(403).json({
-        error: "Forbidden: You do not have permission to view this ticket.",
-        code: "FORBIDDEN_TICKET_ACCESS",
-        ticketId: id,
-        requestedBy: requesterId,
-      });
-    }
+async function requireOwnedTicketParam(req: Request, res: Response, next: NextFunction) {
+  const id = parseStrictId(req.params.id);
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid ticket ID" });
+  }
+  const ticket = await findOwnedTicketOr404(res, id, req.authUser!.id);
+  if (!ticket) return; // findOwnedTicketOr404 already sent the 404 response
+  req.ownedTicket = ticket;
+  next();
+}
 
+async function requireOwnedTicketParamLight(req: Request, res: Response, next: NextFunction) {
+  const id = parseStrictId(req.params.id);
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid ticket ID" });
+  }
+  const ticket = await findOwnedTicketLightOr404(res, id, req.authUser!.id);
+  if (!ticket) return;
+  req.ownedTicketLight = ticket;
+  next();
+}
+
+app.get("/api/tickets/:id", requireAuth, requirePasswordChanged, requireOwnedTicketParam, async (req: Request, res: Response) => {
+  try {
+    const ticket = req.ownedTicket!;
     const removedAttachments = await getPrisma().attachment.findMany({
-      where: { ticketId: id, isRemoved: true },
+      where: { ticketId: ticket.id, isRemoved: true },
       orderBy: { id: "asc" },
     });
 
-    return res.status(200).json({ ...ticket, removedAttachments });
+    return res.status(200).json({ ...serializeTicket(ticket), removedAttachments });
   } catch (err) {
     console.error("Get ticket detail error:", err);
     return res.status(500).json({ error: "Failed to fetch ticket detail" });
   }
 });
 
-app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
+app.patch("/api/tickets/:id", requireAuth, requirePasswordChanged, requireOwnedTicketParam, async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      return res.status(400).json({ error: "Invalid ticket ID" });
-    }
+    const id = req.ownedTicket!.id;
 
     const { summary, description, priority, categoryId, relatedSystemId } = req.body;
 
@@ -302,10 +584,11 @@ app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
     }
 
     if (priority !== undefined) {
-      if (!["Low", "Medium", "High", "Urgent"].includes(priority)) {
+      const normalized = normalizePriority(String(priority));
+      if (!normalized) {
         return res.status(400).json({ error: "Invalid priority value" });
       }
-      dataToUpdate.priority = priority;
+      dataToUpdate.requestedPriority = normalized;
     }
 
     if (categoryId !== undefined) {
@@ -333,40 +616,35 @@ app.patch("/api/tickets/:id", async (req: Request, res: Response) => {
       include: {
         category: true,
         relatedSystem: true,
-        requester: true,
+        requester: { select: SAFE_REQUESTER_SELECT },
         attachments: {
           where: { isRemoved: false },
         },
       },
     });
 
-    return res.status(200).json(updatedTicket);
+    return res.status(200).json(serializeTicket(updatedTicket));
   } catch (err) {
     console.error("Update ticket error:", err);
     return res.status(500).json({ error: "Failed to update ticket" });
   }
 });
 
-// Add attachment to existing ticket
+// Add attachment to existing ticket. requireOwnedTicketParam runs BEFORE
+// upload.array() (fixed in review): the previous order let multer write
+// files to disk ahead of the ownership check, so a non-owner repeatedly
+// POSTing to another user's ticket ID still left orphaned files on disk
+// under a 404 response. Ownership is now confirmed first, so multer's
+// disk-write middleware never runs for a request that will be rejected.
 app.post(
   "/api/tickets/:id/attachments",
+  requireAuth,
+  requirePasswordChanged,
+  requireOwnedTicketParam,
   upload.array("attachments", 5),
   async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        return res.status(400).json({ error: "Invalid ticket ID" });
-      }
-
-      const ticket = await getPrisma().ticket.findUnique({
-        where: { id },
-        include: { attachments: { where: { isRemoved: false } } },
-      });
-
-      if (!ticket) {
-        return res.status(404).json({ error: "Ticket not found" });
-      }
-
+      const ticket = req.ownedTicket!;
       const files = (req.files as Express.Multer.File[]) || [];
       if (files.length === 0) {
         return res.status(400).json({ error: "No files provided" });
@@ -382,7 +660,7 @@ app.post(
         files.map((file) =>
           getPrisma().attachment.create({
             data: {
-              ticketId: id,
+              ticketId: ticket.id,
               fileName: file.originalname,
               fileUrl: `/uploads/${file.filename}`,
               fileSize: file.size,
@@ -404,18 +682,20 @@ app.post(
 // Soft-remove attachment
 app.delete(
   "/api/tickets/:id/attachments/:attachmentId",
+  requireAuth,
+  requirePasswordChanged,
+  requireOwnedTicketParam,
   async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      const attachmentId = parseInt(req.params.attachmentId, 10);
+      const ticket = req.ownedTicket!;
+      const attachmentId = parseStrictId(req.params.attachmentId);
       const reason = req.body?.reason || "Removed by user";
-
-      if (isNaN(id) || isNaN(attachmentId)) {
+      if (attachmentId === null) {
         return res.status(400).json({ error: "Invalid parameters" });
       }
 
       const attachment = await getPrisma().attachment.findFirst({
-        where: { id: attachmentId, ticketId: id },
+        where: { id: attachmentId, ticketId: ticket.id },
       });
 
       if (!attachment) {
@@ -442,16 +722,62 @@ app.delete(
   }
 );
 
+// Download an attachment. Added in I-4 — the Lab 2 client previously linked
+// directly to the static /uploads/<file> path, which enforced neither
+// ownership nor removal state despite the Lab 2 report describing 403/410
+// protection there. Fixed in review: an unauthenticated express.static
+// mount at /uploads was still live alongside this route, which would have
+// let anyone with a fileUrl bypass this endpoint entirely — that mount has
+// been removed, so this is now the only way to reach an attachment's file.
+app.get(
+  "/api/tickets/:id/attachments/:attachmentId/download",
+  requireAuth,
+  requirePasswordChanged,
+  requireOwnedTicketParam,
+  async (req: Request, res: Response) => {
+    try {
+      const ticket = req.ownedTicket!;
+      const attachmentId = parseStrictId(req.params.attachmentId);
+      if (attachmentId === null) {
+        return res.status(400).json({ error: "Invalid parameters" });
+      }
+
+      const attachment = await getPrisma().attachment.findFirst({ where: { id: attachmentId, ticketId: ticket.id } });
+      if (!attachment) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Attachment not found." } });
+      }
+      if (attachment.isRemoved) {
+        return res.status(410).json({ error: { code: "ATTACHMENT_REMOVED", message: "This attachment has been removed." } });
+      }
+
+      const absolutePath = path.join(uploadsDir, path.basename(attachment.fileUrl));
+      return res.download(absolutePath, attachment.fileName, (err) => {
+        if (err && !res.headersSent) {
+          res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to download attachment." } });
+        }
+      });
+    } catch (err) {
+      console.error("Download attachment error:", err);
+      return res.status(500).json({ error: "Failed to download attachment" });
+    }
+  }
+);
+
 // ---------------------------------------------------------------------------
 // Lab 2 — Issue 4: Create Ticket API (POST /api/tickets)
 // ---------------------------------------------------------------------------
 app.post(
   "/api/tickets",
+  requireAuth,
+  requirePasswordChanged,
   upload.array("attachments", 5),
   async (req: Request, res: Response) => {
     try {
-      const { summary, description, priority, categoryId, relatedSystemId, requesterId } =
-        req.body;
+      const { summary, description, priority, categoryId, relatedSystemId } = req.body;
+      // BR-03: ownership is the authenticated identity, never a client-
+      // supplied requesterId. The field is no longer read from the body at
+      // all — requireAuth has already confirmed this user is active.
+      const requesterId = req.authUser!.id;
 
       const errors: { field: string; message: string }[] = [];
 
@@ -477,14 +803,6 @@ app.post(
         });
       }
 
-      const parsedRequesterId = parseInt(requesterId, 10);
-      if (isNaN(parsedRequesterId)) {
-        errors.push({
-          field: "requesterId",
-          message: "A valid requester ID is required.",
-        });
-      }
-
       if (errors.length > 0) {
         return res.status(400).json({
           error: "Validation failed",
@@ -502,20 +820,8 @@ app.post(
         });
       }
 
-      const requester = await getPrisma().requesterUser.findUnique({
-        where: { id: parsedRequesterId },
-      });
-      if (!requester || !requester.isActive) {
-        return res.status(400).json({
-          error: "Invalid requester",
-          details: [{ field: "requesterId", message: "Requester is not active or does not exist." }],
-        });
-      }
-
       const parsedSystemId = relatedSystemId ? parseInt(relatedSystemId, 10) : null;
-      const validPriority = ["Low", "Medium", "High", "Urgent"].includes(priority)
-        ? priority
-        : "Medium";
+      const validPriority = normalizePriority(String(priority)) ?? Priority.MEDIUM;
 
       const ticketNumber = generateTicketNumber();
 
@@ -533,11 +839,11 @@ app.post(
           ticketNumber,
           summary: summary.trim(),
           description: description.trim(),
-          priority: validPriority,
-          status: "New",
+          requestedPriority: validPriority,
+          status: TicketStatus.NEW,
           categoryId: parsedCategoryId,
           relatedSystemId: parsedSystemId && !isNaN(parsedSystemId) ? parsedSystemId : null,
-          requesterId: parsedRequesterId,
+          requesterId: requesterId,
           attachments: {
             create: attachmentsData,
           },
@@ -545,15 +851,1196 @@ app.post(
         include: {
           category: true,
           relatedSystem: true,
-          requester: true,
+          requester: { select: SAFE_REQUESTER_SELECT },
           attachments: true,
         },
       });
 
-      return res.status(201).json(newTicket);
+      return res.status(201).json(serializeTicket(newTicket));
     } catch (err) {
       console.error("Create ticket error:", err);
       return res.status(500).json({ error: "Failed to create ticket" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-5) — Public Comments and the Requester resolution signal
+// ---------------------------------------------------------------------------
+
+// BR-04: Public Comments are visible to the Requester (own Ticket only), IT
+// Staff, and Administrator. A Requester who does not own the Ticket gets 404
+// (BR-32) — the IT Staff/Administrator staff-side UI (I-6/I-7) reuses this
+// same endpoint against any Ticket, so only the Requester path is
+// ownership-scoped here. Built on the same fetchAuthorizedTicketOr404 core
+// as findOwnedTicketOr404 above (fixed in review: this previously
+// reimplemented the 404-masking response independently).
+async function findVisibleTicketOr404(res: Response, id: number, authUser: NonNullable<Request["authUser"]>) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () => getPrisma().ticket.findUnique({ where: { id } }),
+    (ticket) => authUser.role !== Role.REQUESTER || ticket.requesterId === authUser.id
+  );
+}
+
+type VisibleTicket = NonNullable<Awaited<ReturnType<typeof findVisibleTicketOr404>>>;
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      visibleTicket?: VisibleTicket;
+    }
+  }
+}
+
+async function requireTicketVisibleToUser(req: Request, res: Response, next: NextFunction) {
+  const id = parseStrictId(req.params.id);
+  if (id === null) {
+    return res.status(400).json({ error: "Invalid ticket ID" });
+  }
+  const ticket = await findVisibleTicketOr404(res, id, req.authUser!);
+  if (!ticket) return;
+  req.visibleTicket = ticket;
+  next();
+}
+
+function validateCommentBody(body: unknown): string | null {
+  if (typeof body !== "string") return null;
+  const trimmed = body.trim();
+  if (trimmed.length === 0 || trimmed.length > 2000) return null;
+  return trimmed;
+}
+
+app.get(
+  "/api/tickets/:id/comments",
+  requireAuth,
+  requirePasswordChanged,
+  requireTicketVisibleToUser,
+  async (req: Request, res: Response) => {
+    try {
+      const comments = await getPrisma().publicComment.findMany({
+        where: { ticketId: req.visibleTicket!.id },
+        include: { author: { select: { id: true, name: true, role: true } } },
+        orderBy: { createdAt: "asc" },
+      });
+      return res.status(200).json(
+        comments.map((c) => ({
+          id: c.id,
+          ticketId: c.ticketId,
+          authorId: c.authorId,
+          authorName: c.author.name,
+          authorRole: c.author.role,
+          body: c.body,
+          createdAt: c.createdAt,
+        }))
+      );
+    } catch (err) {
+      console.error("List comments error:", err);
+      return res.status(500).json({ error: "Failed to fetch comments" });
+    }
+  }
+);
+
+app.post(
+  "/api/tickets/:id/comments",
+  requireAuth,
+  requirePasswordChanged,
+  requireTicketVisibleToUser,
+  async (req: Request, res: Response) => {
+    try {
+      // BR-23: empty/whitespace-only rejected, 1-2000 chars.
+      const body = validateCommentBody(req.body?.body);
+      if (body === null) {
+        return res.status(400).json({
+          error: { code: "VALIDATION_ERROR", message: "Comment must be between 1 and 2000 characters." },
+        });
+      }
+
+      // BR-22: author and timestamp are server-set, never trusted from the client.
+      const comment = await getPrisma().publicComment.create({
+        data: { ticketId: req.visibleTicket!.id, authorId: req.authUser!.id, body },
+        include: { author: { select: { id: true, name: true, role: true } } },
+      });
+
+      return res.status(201).json({
+        id: comment.id,
+        ticketId: comment.ticketId,
+        authorId: comment.authorId,
+        authorName: comment.author.name,
+        authorRole: comment.author.role,
+        body: comment.body,
+        createdAt: comment.createdAt,
+      });
+    } catch (err) {
+      console.error("Create comment error:", err);
+      return res.status(500).json({ error: "Failed to post comment" });
+    }
+  }
+);
+
+// BR-05, D-10: a Requester may indicate a problem appears resolved, but this
+// is a flag plus an auto-generated Public Comment — never a status change.
+// A client sending a status field alongside this call has no effect; there
+// is no status field in this route's contract at all.
+// (RESOLUTION_SIGNAL_BLOCKED_STATUSES is defined near serializeTicket at
+// the top of this file, shared with the canSignalResolution flag.)
+
+function createResolutionComment(tx: Prisma.TransactionClient, ticketId: number, authorId: number) {
+  return tx.publicComment.create({
+    data: {
+      ticketId,
+      authorId,
+      body: "The Requester has indicated that this problem appears resolved.",
+    },
+    include: { author: { select: { id: true, name: true, role: true } } },
+  });
+}
+
+app.post(
+  "/api/tickets/:id/resolution-signal",
+  requireAuth,
+  requirePasswordChanged,
+  requireOwnedTicketParamLight,
+  async (req: Request, res: Response) => {
+    try {
+      const ticket = req.ownedTicketLight!;
+      const now = new Date();
+
+      // Fixed in review: this previously only checked terminal status,
+      // never whether requesterResolvedAt was already set, so a
+      // double-click or retry on a still-open ticket would overwrite the
+      // timestamp and create a duplicate comment on every call. The check
+      // is also done as the WHERE clause of the UPDATE itself (inside the
+      // transaction), not read-then-write from req.ownedTicketLight, so a
+      // concurrent second request can't race past a stale in-memory read —
+      // Postgres serializes the two UPDATEs on this row, and the second
+      // one's WHERE clause simply won't match anymore once the first has
+      // committed.
+      // The transaction returns the created comment directly (or null if
+      // the conditional update didn't match) into a plain const, rather
+      // than mutating closure-captured `let`s — TypeScript narrows a
+      // function's own return value normally; it does not narrow a `let`
+      // reassigned from inside a nested closure.
+      const createdComment = await getPrisma().$transaction(async (tx) => {
+        const result = await tx.ticket.updateMany({
+          where: {
+            id: ticket.id,
+            status: { notIn: RESOLUTION_SIGNAL_BLOCKED_STATUSES },
+            requesterResolvedAt: null,
+          },
+          data: { requesterResolvedAt: now },
+        });
+        if (result.count === 0) return null;
+        return createResolutionComment(tx, ticket.id, req.authUser!.id);
+      });
+
+      if (!createdComment) {
+        return res.status(409).json({
+          error: {
+            code: "TICKET_ALREADY_TERMINAL_OR_SIGNALED",
+            message: "This ticket is already resolved, closed, cancelled, or has already been signaled.",
+          },
+        });
+      }
+
+      return res.status(200).json({
+        id: ticket.id,
+        requesterResolvedAt: now,
+        comment: {
+          id: createdComment.id,
+          ticketId: createdComment.ticketId,
+          authorId: createdComment.authorId,
+          authorName: createdComment.author.name,
+          authorRole: createdComment.author.role,
+          body: createdComment.body,
+          createdAt: createdComment.createdAt,
+        },
+      });
+    } catch (err) {
+      console.error("Resolution signal error:", err);
+      return res.status(500).json({ error: "Failed to record resolution signal" });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-6) — IT Staff Ticket Queue
+// ---------------------------------------------------------------------------
+
+// The staff queue needs the full 8-value TicketStatus/4-value Priority enums
+// and owner information verbatim — serializeTicket above deliberately
+// collapses status/priority back to the Lab 2 legacy casing for the
+// Requester-facing routes, which would silently drop the 4 new statuses
+// (OPEN, WAITING_FOR_REQUESTER, REOPENED, CANCELLED) this screen must show.
+// This is therefore a separate, small projection rather than a reuse of
+// serializeTicket, per api-spec.md §4 (raw enum values on the wire here).
+// Trimmed down in review of PR #67 (item 7): `description` and the
+// requester's name/email were included on every row but the Queue UI never
+// rendered them, which meant PII (requester name/email) and the full
+// description text were shipped on a list that refetches on every
+// keystroke. `description` is kept here because the item-1 "Open" modal
+// fix (also from that review) renders it from the already-fetched list
+// row rather than a new detail endpoint; `requesterName` is kept because
+// the modal's "Requester" field displays it. `requesterEmail` is dropped —
+// nothing on the row or in the modal renders it.
+function serializeStaffTicket(ticket: {
+  id: number;
+  ticketNumber: string;
+  summary: string;
+  description: string;
+  requestedPriority: Priority;
+  itPriority: Priority;
+  status: TicketStatus;
+  categoryId: number;
+  category: { id: number; name: string };
+  ownerId: number | null;
+  owner: { id: number; name: string } | null;
+  requesterId: number;
+  requester: { id: number; name: string };
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    id: ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    summary: ticket.summary,
+    description: ticket.description,
+    categoryId: ticket.categoryId,
+    category: ticket.category,
+    requestedPriority: ticket.requestedPriority,
+    itPriority: ticket.itPriority,
+    status: ticket.status,
+    ownerId: ticket.ownerId,
+    ownerName: ticket.owner?.name ?? null,
+    requesterId: ticket.requesterId,
+    requesterName: ticket.requester.name,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+  };
+}
+
+const STAFF_QUEUE_SORT_FIELDS = ["createdAt", "updatedAt", "itPriority", "status", "ticketNumber"] as const;
+type StaffQueueSortField = (typeof STAFF_QUEUE_SORT_FIELDS)[number];
+
+function validationError(field: string, message: string) {
+  return { error: { code: "VALIDATION_ERROR", message: `Invalid '${field}': ${message}` } };
+}
+
+// Shared "core + thin call sites" pagination/ordering/count-plus-findMany
+// shape for GET /api/tickets and GET /api/staff/tickets (item 8 in review
+// of PR #67 — same divergence risk the last two PRs' reviews fixed for
+// ownership checks via fetchAuthorizedTicketOr404). The two routes have
+// different `where` shapes, different sortable-field sets, and different
+// serialization, so only the pagination/count/findMany execution is
+// shared here, parameterized by the caller's `where` and `orderBy` — not
+// a single mega-function covering validation or serialization too.
+async function fetchPaginatedTickets<T>(params: {
+  where: Prisma.TicketWhereInput;
+  orderBy: Prisma.TicketOrderByWithRelationInput;
+  skip: number;
+  take: number;
+  include: Prisma.TicketInclude;
+}): Promise<{ total: number; rows: T[] }> {
+  const { where, orderBy, skip, take, include } = params;
+  const [total, rows] = await Promise.all([
+    getPrisma().ticket.count({ where }),
+    getPrisma().ticket.findMany({ where, orderBy, skip, take, include }) as Promise<T[]>,
+  ]);
+  return { total, rows };
+}
+
+app.get(
+  "/api/staff/tickets",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize } = req.query;
+
+      const where: Prisma.TicketWhereInput = {};
+
+      if (status !== undefined && status !== "All") {
+        if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
+          return res.status(400).json(validationError("status", "must be a valid TicketStatus or 'All'."));
+        }
+        where.status = status as TicketStatus;
+      }
+
+      if (itPriority !== undefined && itPriority !== "All") {
+        if (typeof itPriority !== "string" || !(Object.values(Priority) as string[]).includes(itPriority)) {
+          return res.status(400).json(validationError("itPriority", "must be a valid Priority or 'All'."));
+        }
+        where.itPriority = itPriority as Priority;
+      }
+
+      if (categoryId !== undefined) {
+        const parsedCategoryId = typeof categoryId === "string" ? parseStrictId(categoryId) : null;
+        if (parsedCategoryId === null) {
+          return res.status(400).json(validationError("categoryId", "must be an integer."));
+        }
+        where.categoryId = parsedCategoryId;
+      }
+
+      if (ownerId !== undefined) {
+        if (ownerId === "unassigned") {
+          where.ownerId = null;
+        } else {
+          const parsedOwnerId = typeof ownerId === "string" ? parseStrictId(ownerId) : null;
+          if (parsedOwnerId === null) {
+            return res.status(400).json(validationError("ownerId", "must be an integer or 'unassigned'."));
+          }
+          where.ownerId = parsedOwnerId;
+        }
+      }
+
+      if (search !== undefined) {
+        if (typeof search !== "string") {
+          return res.status(400).json(validationError("search", "must be a string."));
+        }
+        const query = search.trim();
+        if (query.length > 0) {
+          where.OR = [
+            { ticketNumber: { contains: query, mode: "insensitive" } },
+            { summary: { contains: query, mode: "insensitive" } },
+            { description: { contains: query, mode: "insensitive" } },
+            { requester: { name: { contains: query, mode: "insensitive" } } },
+            { requester: { email: { contains: query, mode: "insensitive" } } },
+          ];
+        }
+      }
+
+      // Default ordering is updatedAt desc per api-spec.md §4.
+      let sortField: StaffQueueSortField = "updatedAt";
+      if (sort !== undefined) {
+        if (typeof sort !== "string" || !(STAFF_QUEUE_SORT_FIELDS as readonly string[]).includes(sort)) {
+          return res.status(400).json(validationError("sort", `must be one of ${STAFF_QUEUE_SORT_FIELDS.join(", ")}.`));
+        }
+        sortField = sort as StaffQueueSortField;
+      }
+
+      let sortOrder: Prisma.SortOrder = "desc";
+      if (order !== undefined) {
+        if (order !== "asc" && order !== "desc") {
+          return res.status(400).json(validationError("order", "must be 'asc' or 'desc'."));
+        }
+        sortOrder = order;
+      }
+
+      // Upper bound added in review of PR #67 (item 3): pageSize was
+      // already capped at 50, but page itself only rejected < 1, so
+      // something like page=99999999999999999999 passed the /^\d+$/
+      // check and produced a huge `skip` handed straight to Prisma —
+      // likely surfacing as an unhandled 500 instead of this route's
+      // usual clean 400. 100000 is far beyond any real result set at
+      // pageSize<=50 (5,000,000 rows) while still comfortably bounded.
+      const MAX_PAGE = 100000;
+      let pageNum = 1;
+      if (page !== undefined) {
+        const parsedPage = typeof page === "string" ? parseStrictId(page) : null;
+        if (parsedPage === null || parsedPage < 1) {
+          return res.status(400).json(validationError("page", "must be a positive integer."));
+        }
+        if (parsedPage > MAX_PAGE) {
+          return res.status(400).json(validationError("page", `must not exceed ${MAX_PAGE}.`));
+        }
+        pageNum = parsedPage;
+      }
+
+      let pageSizeNum = 10;
+      if (pageSize !== undefined) {
+        const parsedPageSize = typeof pageSize === "string" ? parseStrictId(pageSize) : null;
+        if (parsedPageSize === null || parsedPageSize < 1) {
+          return res.status(400).json(validationError("pageSize", "must be a positive integer."));
+        }
+        if (parsedPageSize > 50) {
+          return res.status(400).json(validationError("pageSize", "must not exceed 50."));
+        }
+        pageSizeNum = parsedPageSize;
+      }
+
+      const skip = (pageNum - 1) * pageSizeNum;
+
+      const { total, rows: tickets } = await fetchPaginatedTickets<
+        Parameters<typeof serializeStaffTicket>[0]
+      >({
+        where,
+        orderBy: { [sortField]: sortOrder },
+        skip,
+        take: pageSizeNum,
+        include: {
+          category: { select: { id: true, name: true } },
+          owner: { select: STAFF_OWNER_SELECT },
+          requester: { select: { id: true, name: true } },
+        },
+      });
+
+      const totalPages = Math.max(1, Math.ceil(total / pageSizeNum));
+
+      return res.status(200).json({
+        data: tickets.map(serializeStaffTicket),
+        pagination: {
+          page: pageNum,
+          pageSize: pageSizeNum,
+          total,
+          totalPages,
+        },
+      });
+    } catch (err) {
+      console.error("Staff ticket queue error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch the ticket queue." } });
+    }
+  }
+);
+
+// Added in review of PR #67 (item 2) to support the Queue's Owner filter
+// picker. There was no existing endpoint that lists IT Staff/Administrator
+// users for a picker — /api/admin/users is Administrator-only per
+// api-spec.md §5, which is wrong here since a regular IT_STAFF member must
+// also be able to filter the queue by owner. This returns just the minimal
+// roster data the picker needs ([{ id, name }], active staff only, ordered
+// by name), not the fuller shape /api/admin/users returns.
+app.get(
+  "/api/staff/members",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (_req: Request, res: Response) => {
+    try {
+      const members = await getPrisma().user.findMany({
+        where: { role: { in: [Role.IT_STAFF, Role.ADMINISTRATOR] }, isActive: true },
+        orderBy: { name: "asc" },
+        select: STAFF_OWNER_SELECT,
+      });
+      return res.status(200).json(members);
+    } catch (err) {
+      console.error("Staff members list error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch staff members." } });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-7) — IT Staff Ticket Detail
+// ---------------------------------------------------------------------------
+
+// Staff visibility of a Ticket is NOT ownership-scoped (unlike the
+// Requester routes' fetchAuthorizedTicketOr404 usage above) — any IT
+// Staff/Administrator may open any Ticket, per §6. requireRole has already
+// gated every route below to IT_STAFF/ADMINISTRATOR before this runs, so
+// the `isAuthorized` predicate is always true; this still goes through
+// the same fetchAuthorizedTicketOr404 core (rather than a bespoke
+// findUnique + manual 404) so a not-found Ticket ID gets the same
+// { error: { code: "NOT_FOUND", ... } } shape as every other Ticket-scoped
+// route in this file, and so a future change to that response shape only
+// has one place to change.
+// Shared with the three PATCH handlers below (item 4 in review of PR #68):
+// this is the exact `include` shape `ticket.update()` is given directly so
+// the write and the read happen in one query, instead of a second
+// `findStaffTicketOr404` call after every write.
+const STAFF_TICKET_DETAIL_INCLUDE = {
+  category: true,
+  relatedSystem: true,
+  requester: { select: SAFE_REQUESTER_SELECT },
+  owner: { select: STAFF_OWNER_SELECT },
+  attachments: { where: { isRemoved: false }, orderBy: { id: "asc" as const } },
+} satisfies Prisma.TicketInclude;
+
+async function findStaffTicketOr404(res: Response, id: number) {
+  return fetchAuthorizedTicketOr404(
+    res,
+    () =>
+      getPrisma().ticket.findUnique({
+        where: { id },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      }),
+    () => true
+  );
+}
+
+type StaffTicket = NonNullable<Awaited<ReturnType<typeof findStaffTicketOr404>>>;
+
+function serializeStaffTicketDetail(ticket: StaffTicket) {
+  return {
+    id: ticket.id,
+    ticketNumber: ticket.ticketNumber,
+    summary: ticket.summary,
+    description: ticket.description,
+    categoryId: ticket.categoryId,
+    category: ticket.category,
+    relatedSystemId: ticket.relatedSystemId,
+    relatedSystem: ticket.relatedSystem,
+    requestedPriority: ticket.requestedPriority,
+    itPriority: ticket.itPriority,
+    status: ticket.status,
+    // Server-computed permitted destinations (BR-19, §6.5) — the client's
+    // Status control reads this directly instead of keeping an
+    // independent copy of the transition matrix, per the same
+    // "server computes, client reads" fix PR #66 applied to
+    // canSignalResolution above.
+    permittedStatusTransitions: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId),
+    ownerId: ticket.ownerId,
+    owner: ticket.owner,
+    requesterId: ticket.requesterId,
+    requester: ticket.requester,
+    attachments: ticket.attachments,
+    requesterResolvedAt: ticket.requesterResolvedAt,
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+  };
+}
+
+app.get(
+  "/api/staff/tickets/:id",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      return res.status(200).json(serializeStaffTicketDetail(ticket));
+    } catch (err) {
+      console.error("Get staff ticket detail error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch ticket detail." } });
+    }
+  }
+);
+
+// BR-13: ownerId (when non-null) must reference an active IT Staff or
+// Administrator user. Covers both claim (ownerId === acting user's own id)
+// and reassignment (ownerId === any other active staff id, BR-14) — the
+// spec draws no distinction between the two beyond the value sent.
+app.patch(
+  "/api/staff/tickets/:id/owner",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const { ownerId } = req.body ?? {};
+      if (ownerId !== null && !Number.isInteger(ownerId)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'ownerId' must be an integer or null." } });
+      }
+
+      if (ownerId !== null) {
+        const candidate = await getPrisma().user.findUnique({ where: { id: ownerId } });
+        if (!candidate || !candidate.isActive || !(candidate.role === Role.IT_STAFF || candidate.role === Role.ADMINISTRATOR)) {
+          return res.status(400).json({
+            error: { code: "VALIDATION_ERROR", message: "'ownerId' must reference an active IT Staff or Administrator user." },
+          });
+        }
+      }
+
+      // Item 4 in review of PR #68: pass STAFF_TICKET_DETAIL_INCLUDE
+      // directly to update() instead of a second findStaffTicketOr404
+      // call — one query instead of two, and no theoretical 404-on-a-
+      // successful-write race (an update() on an id just confirmed to
+      // exist can't itself return "not found" the way a second fetch
+      // could in principle race on).
+      const updated = await getPrisma().ticket.update({
+        where: { id: ticket.id },
+        data: { ownerId },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      });
+
+      return res.status(200).json(serializeStaffTicketDetail(updated));
+    } catch (err) {
+      console.error("Set ticket owner error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update ticket owner." } });
+    }
+  }
+);
+
+// BR-16: IT Priority is validated against the Priority enum and updated
+// independently of the immutable Requested Priority (BR-15).
+app.patch(
+  "/api/staff/tickets/:id/it-priority",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const { itPriority } = req.body ?? {};
+      if (typeof itPriority !== "string" || !(Object.values(Priority) as string[]).includes(itPriority)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'itPriority' must be a valid Priority value." } });
+      }
+
+      const updated = await getPrisma().ticket.update({
+        where: { id: ticket.id },
+        data: { itPriority: itPriority as Priority },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      });
+
+      return res.status(200).json(serializeStaffTicketDetail(updated));
+    } catch (err) {
+      console.error("Set IT priority error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update IT priority." } });
+    }
+  }
+);
+
+// BR-19/BR-17/§6.5: validated against the single STATUS_TRANSITIONS matrix
+// (server/src/utils/statusTransitions.ts) shared with GET's
+// permittedStatusTransitions field and the UNIT-03/04 unit tests.
+app.patch(
+  "/api/staff/tickets/:id/status",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const { status } = req.body ?? {};
+      if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'status' must be a valid TicketStatus value." } });
+      }
+      const targetStatus = status as TicketStatus;
+
+      if (!isLegalTransition(ticket.status, targetStatus)) {
+        return res.status(409).json({
+          error: { code: "ILLEGAL_TRANSITION", permitted: getPermittedTransitions(ticket.status) },
+        });
+      }
+
+      // BR-17: a Ticket cannot enter IN_PROGRESS while unassigned, even
+      // though IN_PROGRESS may otherwise be a legal destination from the
+      // current status. Shared with GET's permittedStatusTransitions via
+      // getPermittedTransitionsForTicket (statusTransitions.ts) — fixed in
+      // review of PR #68 (item 1): this filter used to be duplicated here
+      // independently of GET's unfiltered getPermittedTransitions call.
+      if (targetStatus === TicketStatus.IN_PROGRESS && ticket.ownerId === null) {
+        return res.status(409).json({
+          error: {
+            code: "ILLEGAL_TRANSITION",
+            message: "A ticket cannot enter IN_PROGRESS while unassigned.",
+            permitted: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId),
+          },
+        });
+      }
+
+      const updated = await getPrisma().ticket.update({
+        where: { id: ticket.id },
+        data: { status: targetStatus },
+        include: STAFF_TICKET_DETAIL_INCLUDE,
+      });
+
+      return res.status(200).json(serializeStaffTicketDetail(updated));
+    } catch (err) {
+      console.error("Set ticket status error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update ticket status." } });
+    }
+  }
+);
+
+// Internal Notes (BR-04, BR-21-BR-24): IT Staff/Administrator only. A
+// Requester's request is rejected by requireRole above with the same
+// generic { error: { code: "FORBIDDEN", ... } } body every other
+// role-gated route in this file returns — no note content, not even an
+// empty typed array, is ever present in that response. Mirrors the
+// GET/POST /api/tickets/:id/comments shape above (validateCommentBody,
+// author/timestamp server-set) but against the separate InternalNote
+// table and with no ownership scoping (any Staff/Admin may view any
+// Ticket's notes, same as findStaffTicketOr404 above).
+app.get(
+  "/api/tickets/:id/internal-notes",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      const notes = await getPrisma().internalNote.findMany({
+        where: { ticketId: ticket.id },
+        include: { author: { select: { id: true, name: true, role: true } } },
+        orderBy: { createdAt: "asc" },
+      });
+      return res.status(200).json(
+        notes.map((n) => ({
+          id: n.id,
+          ticketId: n.ticketId,
+          authorId: n.authorId,
+          authorName: n.author.name,
+          authorRole: n.author.role,
+          body: n.body,
+          createdAt: n.createdAt,
+        }))
+      );
+    } catch (err) {
+      console.error("List internal notes error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch internal notes." } });
+    }
+  }
+);
+
+app.post(
+  "/api/tickets/:id/internal-notes",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid ticket ID." } });
+      }
+      const ticket = await findStaffTicketOr404(res, id);
+      if (!ticket) return;
+
+      // BR-23: same 1-2000 char / non-blank validation as Public Comments.
+      const body = validateCommentBody(req.body?.body);
+      if (body === null) {
+        return res.status(400).json({
+          error: { code: "VALIDATION_ERROR", message: "Note must be between 1 and 2000 characters." },
+        });
+      }
+
+      // BR-22: author and timestamp are server-set, never trusted from the client.
+      const note = await getPrisma().internalNote.create({
+        data: { ticketId: ticket.id, authorId: req.authUser!.id, body },
+        include: { author: { select: { id: true, name: true, role: true } } },
+      });
+
+      return res.status(201).json({
+        id: note.id,
+        ticketId: note.ticketId,
+        authorId: note.authorId,
+        authorName: note.author.name,
+        authorRole: note.author.role,
+        body: note.body,
+        createdAt: note.createdAt,
+      });
+    } catch (err) {
+      console.error("Create internal note error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to post internal note." } });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// Lab 3 (I-8) — Administrator User Management
+// ---------------------------------------------------------------------------
+
+// Every response below returns only these fields — never passwordHash.
+// Selected explicitly (not `include`) everywhere this file touches a User
+// row for these routes, per SEC-01's fix above: `select` has no `true`
+// shorthand that could accidentally widen to the full row the way an
+// `include` on a relation would.
+const SAFE_ADMIN_USER_SELECT = { id: true, name: true, email: true, role: true, isActive: true } as const;
+
+const VALID_ROLES = Object.values(Role) as string[];
+
+app.get(
+  "/api/admin/users",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { search, role } = req.query;
+
+      const where: Prisma.UserWhereInput = {};
+
+      if (role !== undefined && role !== "All") {
+        if (typeof role !== "string" || !VALID_ROLES.includes(role)) {
+          return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}, or 'All'.`));
+        }
+        where.role = role as Role;
+      }
+
+      if (search !== undefined) {
+        if (typeof search !== "string") {
+          return res.status(400).json(validationError("search", "must be a string."));
+        }
+        const query = search.trim();
+        if (query.length > 0) {
+          where.OR = [
+            { name: { contains: query, mode: "insensitive" } },
+            { email: { contains: query, mode: "insensitive" } },
+          ];
+        }
+      }
+
+      const users = await getPrisma().user.findMany({
+        where,
+        orderBy: { name: "asc" },
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(200).json(users);
+    } catch (err) {
+      console.error("Admin user list error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to fetch users." } });
+    }
+  }
+);
+
+function validateEmailFormat(email: unknown): string | null {
+  if (typeof email !== "string") return null;
+  const trimmed = email.trim();
+  // Simple, permissive email shape check — this codebase has no existing
+  // email-format validator to reuse, and full RFC validation is out of scope.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+app.post(
+  "/api/admin/users",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const { name, email, role, isActive, initialPassword } = req.body ?? {};
+
+      if (typeof name !== "string" || name.trim().length === 0) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'name' is required." } });
+      }
+
+      const normalizedEmail = validateEmailFormat(email);
+      if (!normalizedEmail) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'email' must be a valid email address." } });
+      }
+
+      // FR-24, BR-25: role must be a valid Role enum value.
+      if (typeof role !== "string" || !VALID_ROLES.includes(role)) {
+        return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}.`));
+      }
+
+      if (typeof isActive !== "boolean") {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'isActive' must be a boolean." } });
+      }
+
+      if (typeof initialPassword !== "string" || !meetsPasswordPolicy(initialPassword)) {
+        return res.status(400).json({
+          error: { code: "WEAK_PASSWORD", message: "Initial password must be at least 8 characters and include a letter and a digit." },
+        });
+      }
+
+      // BR-26: email uniqueness is case-insensitive.
+      const existing = await getPrisma().user.findFirst({
+        where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (existing) {
+        return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+      }
+
+      // New users are always created with mustChangePassword: true — the
+      // initial password is temporary by design (FR-21).
+      const created = await getPrisma().user.create({
+        data: {
+          name: name.trim(),
+          email: normalizedEmail,
+          department: "Unassigned",
+          role: role as Role,
+          isActive,
+          passwordHash: hashPassword(initialPassword),
+          mustChangePassword: true,
+        },
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(201).json(created);
+    } catch (err) {
+      // Review item 5: same app-level-pre-check-races-the-DB-constraint
+      // scenario as the PATCH route above — two concurrent creates with
+      // the same (case-insensitive) email can both pass the pre-check.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+      }
+      console.error("Create user error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to create user." } });
+    }
+  }
+);
+
+// Shared shape returned by checkAdminSafetyRules below: either the request
+// is safe to proceed (with the freshly-read target row, so callers don't
+// need a second read), or it must be rejected with a specific status/body.
+type AdminSafetyResult =
+  | { blocked: false; target: { id: number; email: string; role: Role; isActive: boolean } }
+  | { blocked: true; status: number; error: { code: string; message: string } };
+
+/**
+ * BR-27 (self-modification) + BR-28 (last-Administrator) safety rules for
+ * PATCH /api/admin/users/:id, extracted (review item 6) so any future route
+ * that can also mutate `role`/`isActive` reuses the exact same rules
+ * instead of re-deriving them inline and risking drift.
+ *
+ * MUST be called with a Prisma transaction client (`tx`), not the bare
+ * client — see the BR-28 locking comment below for why.
+ */
+async function checkAdminSafetyRules(
+  tx: Prisma.TransactionClient,
+  actingUserId: number,
+  targetId: number,
+  updates: { role?: Role; isActive?: boolean }
+): Promise<AdminSafetyResult> {
+  const target = await tx.user.findUnique({
+    where: { id: targetId },
+    select: { id: true, email: true, role: true, isActive: true },
+  });
+  if (!target) {
+    return { blocked: true, status: 404, error: { code: "NOT_FOUND", message: "User not found." } };
+  }
+
+  // BR-27: an Administrator cannot deactivate or demote their own
+  // account. Compared against the ACTING user, not the target — an
+  // Administrator may still deactivate/demote a *different* Administrator
+  // freely (subject to BR-28 below). Checked before BR-28 and before the
+  // caller's duplicate-email check (review item 4): a self-modification
+  // attempt that also happens to collide on email must surface as
+  // SELF_MODIFICATION_BLOCKED, not the less-specific DUPLICATE_EMAIL.
+  const isActingOnSelf = actingUserId === target.id;
+  const wouldDeactivateSelf = isActingOnSelf && updates.isActive === false;
+  const wouldDemoteSelf =
+    isActingOnSelf && updates.role !== undefined && updates.role !== Role.ADMINISTRATOR && target.role === Role.ADMINISTRATOR;
+  if (wouldDeactivateSelf || wouldDemoteSelf) {
+    return {
+      blocked: true,
+      status: 403,
+      error: { code: "SELF_MODIFICATION_BLOCKED", message: "You cannot deactivate or change the role of your own account." },
+    };
+  }
+
+  // BR-28: reject any update that would leave zero active Administrators
+  // system-wide. Only relevant when the TARGET user is currently an active
+  // Administrator and the update would make them inactive or
+  // non-Administrator.
+  //
+  // Race-condition fix (review item 1): the previous version counted
+  // "other active Administrators" with a plain SELECT, then wrote, as two
+  // separate non-transactional statements. With exactly two active
+  // Administrators A and B, concurrent PATCHes (A deactivating B, B
+  // deactivating A) could each read "1 other active admin" before either
+  // write committed, and both would pass — leaving zero active
+  // Administrators, exactly the outcome this rule exists to prevent.
+  //
+  // Fix: take an explicit row lock (`SELECT ... FOR UPDATE`) on the full
+  // set of currently-active-Administrator rows, INSIDE this transaction,
+  // before counting. This is what actually closes the race, and plain
+  // `$transaction` at the default READ COMMITTED isolation level does NOT
+  // do it on its own — a count-then-write with no lock can still run
+  // concurrently with another transaction's count-then-write over the same
+  // rows, because neither statement blocks the other. `FOR UPDATE` does:
+  // when transaction T2 tries to lock the same admin rows T1 already
+  // locked, Postgres blocks T2 until T1 commits or rolls back. Once T1
+  // commits (e.g. deactivating B), T2's SELECT ... FOR UPDATE unblocks and
+  // re-reads the now-committed state — so T2's subsequent count correctly
+  // sees B as no longer active. This makes two concurrent "deactivate the
+  // other admin" requests serialize into first-committer-wins, and the
+  // second one's count will correctly come up "0 others" and be rejected.
+  //
+  // Serializable isolation (with retry-on-serialization-failure) was
+  // considered instead, but rejected here: it would push a retry loop onto
+  // every caller of this function for a guarantee that a single explicit
+  // lock over a small, well-known row set (there are only ever a handful
+  // of active Administrators) provides directly and more cheaply. An
+  // atomic single-UPDATE-with-WHERE-subquery (the `resolution-signal`
+  // route's pattern above) was also considered, but doesn't fit here: that
+  // pattern works because the condition being checked lives entirely on
+  // the ROW BEING UPDATED (its own `requesterResolvedAt`/`status`), so
+  // Postgres's normal per-row lock on the UPDATE target is sufficient by
+  // itself. BR-28's condition depends on the state of OTHER rows (the
+  // other active Administrators), which a WHERE-subquery on the target row
+  // does not lock — a concurrent transaction could still read those other
+  // rows' pre-commit state. Locking that set explicitly is required.
+  const targetIsCurrentlyActiveAdmin = target.role === Role.ADMINISTRATOR && target.isActive;
+  const targetWouldStopBeingActiveAdmin =
+    targetIsCurrentlyActiveAdmin &&
+    ((updates.isActive === false) || (updates.role !== undefined && updates.role !== Role.ADMINISTRATOR));
+  if (targetWouldStopBeingActiveAdmin) {
+    // Physical table is "RequesterUser" (see schema.prisma's @@map on the
+    // User model, D-03) — the raw lock statement must target that name.
+    await tx.$queryRaw`SELECT id FROM "RequesterUser" WHERE role = 'ADMINISTRATOR' AND "isActive" = true FOR UPDATE`;
+    const otherActiveAdminCount = await tx.user.count({
+      where: { role: Role.ADMINISTRATOR, isActive: true, NOT: { id: target.id } },
+    });
+    if (otherActiveAdminCount === 0) {
+      return {
+        blocked: true,
+        status: 403,
+        error: {
+          code: "LAST_ADMINISTRATOR",
+          message: "This action would leave zero active Administrator accounts and is not permitted.",
+        },
+      };
+    }
+  }
+
+  return { blocked: false, target };
+}
+
+app.patch(
+  "/api/admin/users/:id",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid user ID." } });
+      }
+
+      const { name, email, role, isActive } = req.body ?? {};
+
+      // Field-shape validation that doesn't need the database, kept as a
+      // fast fail before opening a transaction.
+      if (name !== undefined && (typeof name !== "string" || name.trim().length === 0)) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'name' must be a non-empty string." } });
+      }
+      if (role !== undefined && (typeof role !== "string" || !VALID_ROLES.includes(role))) {
+        return res.status(400).json(validationError("role", `must be one of ${VALID_ROLES.join(", ")}.`));
+      }
+      if (isActive !== undefined && typeof isActive !== "boolean") {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'isActive' must be a boolean." } });
+      }
+      let normalizedEmail: string | undefined;
+      if (email !== undefined) {
+        const parsed = validateEmailFormat(email);
+        if (!parsed) {
+          return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'email' must be a valid email address." } });
+        }
+        normalizedEmail = parsed;
+      }
+
+      const actingUserId = req.authUser!.id;
+
+      // Everything from here on — the BR-27/BR-28 safety check, the
+      // duplicate-email check, and the write — runs inside one
+      // transaction, so the LAST_ADMINISTRATOR lock (inside
+      // checkAdminSafetyRules) actually covers the write it's protecting,
+      // and a concurrent duplicate-email race hits Prisma's own unique
+      // constraint (handled in the catch block below, review item 5)
+      // rather than a stale pre-check.
+      const result = await getPrisma().$transaction(async (tx) => {
+        const safety = await checkAdminSafetyRules(tx, actingUserId, id, {
+          role: role !== undefined ? (role as Role) : undefined,
+          isActive,
+        });
+        if (safety.blocked) {
+          return safety;
+        }
+
+        const data: Prisma.UserUpdateInput = {};
+        if (name !== undefined) data.name = (name as string).trim();
+        if (role !== undefined) data.role = role as Role;
+        if (isActive !== undefined) data.isActive = isActive;
+
+        if (normalizedEmail !== undefined) {
+          // BR-26: uniqueness excludes the target user's own current row.
+          // This app-level pre-check is a fast, friendly 409 for the
+          // common case; the catch block below still handles the rarer
+          // race where a concurrent request slips a duplicate past this
+          // check (review item 5).
+          const duplicate = await tx.user.findFirst({
+            where: { email: { equals: normalizedEmail, mode: "insensitive" }, NOT: { id } },
+            select: { id: true },
+          });
+          if (duplicate) {
+            return {
+              blocked: true as const,
+              status: 409,
+              error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." },
+            };
+          }
+          data.email = normalizedEmail;
+        }
+
+        const updated = await tx.user.update({ where: { id }, data, select: SAFE_ADMIN_USER_SELECT });
+        return { blocked: false as const, updated };
+      });
+
+      if (result.blocked) {
+        return res.status(result.status).json({ error: result.error });
+      }
+      return res.status(200).json(result.updated);
+    } catch (err) {
+      // Review item 5: a concurrent create/edit with the same (case-
+      // insensitive) email can both pass the app-level pre-check above and
+      // then race each other into Prisma's own unique constraint. The
+      // losing write must still surface as 409 DUPLICATE_EMAIL, not fall
+      // through to a generic 500.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        return res.status(409).json({ error: { code: "DUPLICATE_EMAIL", message: "A user with this email address already exists." } });
+      }
+      console.error("Update user error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update user." } });
+    }
+  }
+);
+
+// FR-23: sets a new initial password and forces mustChangePassword. No
+// self-service/last-Administrator restriction applies here (api-spec.md
+// §5) — an Administrator may reset their own or anyone else's password.
+app.post(
+  "/api/admin/users/:id/initial-password",
+  requireAuth,
+  requirePasswordChanged,
+  requireRole(Role.ADMINISTRATOR),
+  async (req: Request, res: Response) => {
+    try {
+      const id = parseStrictId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid user ID." } });
+      }
+
+      const target = await getPrisma().user.findUnique({ where: { id }, select: { id: true } });
+      if (!target) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "User not found." } });
+      }
+
+      const { initialPassword } = req.body ?? {};
+      if (typeof initialPassword !== "string" || !meetsPasswordPolicy(initialPassword)) {
+        return res.status(400).json({
+          error: { code: "WEAK_PASSWORD", message: "Initial password must be at least 8 characters and include a letter and a digit." },
+        });
+      }
+
+      const updated = await getPrisma().user.update({
+        where: { id },
+        data: { passwordHash: hashPassword(initialPassword), mustChangePassword: true },
+        select: SAFE_ADMIN_USER_SELECT,
+      });
+
+      return res.status(200).json(updated);
+    } catch (err) {
+      console.error("Set initial password error:", err);
+      return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to set initial password." } });
     }
   }
 );

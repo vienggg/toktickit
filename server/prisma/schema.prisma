@@ -24,15 +24,30 @@ model Category {
 // Lab 2 Models — Requester Ticketing MVP
 // ---------------------------------------------------------------------------
 
-model RequesterUser {
-  id         Int      @id @default(autoincrement())
-  name       String
-  email      String   @unique
-  department String
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  tickets    Ticket[]
+// Renamed from RequesterUser in Lab 3 (D-03). @@map keeps the physical table
+// name unchanged so no row moves and every existing Ticket.requesterId FK
+// keeps resolving to the same row it always did.
+model User {
+  id                 Int       @id @default(autoincrement())
+  name               String
+  email              String    @unique
+  department         String
+  role               Role      @default(REQUESTER)
+  passwordHash       String
+  mustChangePassword Boolean   @default(true)
+  isActive           Boolean   @default(true)
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  submittedTickets Ticket[]        @relation("TicketRequester")
+  ownedTickets     Ticket[]        @relation("TicketOwner")
+  publicComments   PublicComment[]
+  internalNotes    InternalNote[]
+
+  @@index([role])
+  @@index([isActive])
+  @@map("RequesterUser")
 }
 
 model RelatedSystem {
@@ -45,27 +60,94 @@ model RelatedSystem {
 }
 
 model Ticket {
-  id              Int           @id @default(autoincrement())
-  ticketNumber    String        @unique
-  summary         String
-  description     String
-  priority        String        @default("Medium") // Low, Medium, High, Urgent
-  status          String        @default("New")    // New, In_Progress, Resolved, Closed
-  categoryId      Int
-  relatedSystemId Int?
-  requesterId     Int
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id                 Int          @id @default(autoincrement())
+  ticketNumber       String       @unique
+  summary            String
+  description        String
+  requestedPriority   Priority     @default(MEDIUM) @map("priority")
+  itPriority          Priority     @default(MEDIUM)
+  status              TicketStatus @default(NEW)
+  categoryId          Int
+  relatedSystemId     Int?
+  requesterId         Int
+  ownerId             Int?
+  requesterResolvedAt DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
-  category      Category       @relation(fields: [categoryId], references: [id])
-  relatedSystem RelatedSystem? @relation(fields: [relatedSystemId], references: [id])
-  requester     RequesterUser  @relation(fields: [requesterId], references: [id])
-  attachments   Attachment[]
+  category       Category        @relation(fields: [categoryId], references: [id])
+  relatedSystem  RelatedSystem?  @relation(fields: [relatedSystemId], references: [id])
+  requester      User            @relation("TicketRequester", fields: [requesterId], references: [id])
+  owner          User?           @relation("TicketOwner", fields: [ownerId], references: [id])
+  attachments    Attachment[]
+  publicComments PublicComment[]
+  internalNotes  InternalNote[]
 
   @@index([requesterId])
   @@index([status])
   @@index([categoryId])
   @@index([createdAt])
+  @@index([ownerId])
+  @@index([itPriority])
+  @@index([updatedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Lab 3 Enums — Users, Roles, IT Staff Ticketing, and Admin Screens
+// ---------------------------------------------------------------------------
+enum Role {
+  REQUESTER
+  IT_STAFF
+  ADMINISTRATOR
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  NEW
+  OPEN
+  IN_PROGRESS
+  WAITING_FOR_REQUESTER
+  RESOLVED
+  CLOSED
+  REOPENED
+  CANCELLED
+}
+
+// Shared communication, visible to Requester, IT Staff, and Administrator.
+// Append-only in Lab 3 (BR-21): no update/delete fields or endpoints.
+model PublicComment {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  authorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
+}
+
+// Operational notes visible only to IT Staff and Administrator (BR-04, BR-24).
+// A separate table from PublicComment so a Requester-scoped query can never
+// structurally return note content, rather than relying on a filter clause.
+model InternalNote {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  authorId  Int
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId, createdAt])
 }
 
 model Attachment {

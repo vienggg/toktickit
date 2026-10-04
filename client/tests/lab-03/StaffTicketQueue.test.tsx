@@ -1,0 +1,290 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
+import React from 'react';
+import { AuthProvider } from '../../src/context/AuthContext';
+import { StaffTicketQueue } from '../../src/components/StaffTicketQueue';
+
+const mockStaffUser = {
+  id: 10,
+  name: 'Sam Rivera',
+  email: 'sam.rivera@toktick.internal',
+  department: 'IT',
+  role: 'IT_STAFF',
+  mustChangePassword: false,
+};
+
+interface MockQueueTicket {
+  id: number;
+  ticketNumber: string;
+  summary: string;
+  description: string;
+  categoryId: number;
+  category: { id: number; name: string };
+  requestedPriority: string;
+  itPriority: string;
+  status: string;
+  ownerId: number | null;
+  ownerName: string | null;
+  requesterId: number;
+  requesterName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const baseTicket: MockQueueTicket = {
+  id: 1,
+  ticketNumber: 'TKT-2026-000201',
+  summary: 'Printer offline on 3rd floor',
+  description: 'The printer will not respond to print jobs.',
+  categoryId: 2,
+  category: { id: 2, name: 'Hardware' },
+  requestedPriority: 'HIGH',
+  itPriority: 'URGENT',
+  status: 'NEW',
+  ownerId: null,
+  ownerName: null,
+  requesterId: 5,
+  requesterName: 'Jennifer Anderson',
+  createdAt: '2026-09-01T10:00:00Z',
+  updatedAt: '2026-09-02T10:00:00Z',
+};
+
+const mockStaffMembers = [
+  { id: 10, name: 'Sam Rivera' },
+  { id: 11, name: 'Alex Chen' },
+];
+
+let queueTickets: MockQueueTicket[] = [];
+
+function mockFetchImpl(url: RequestInfo | URL) {
+  const urlStr = String(url);
+  if (urlStr.includes('/api/auth/me')) {
+    return Promise.resolve({ ok: true, json: async () => ({ user: mockStaffUser }) } as Response);
+  }
+  if (urlStr.includes('/api/categories')) {
+    return Promise.resolve({ ok: true, json: async () => [{ id: 2, name: 'Hardware' }] } as Response);
+  }
+  if (urlStr.includes('/api/staff/members')) {
+    return Promise.resolve({ ok: true, json: async () => mockStaffMembers } as Response);
+  }
+  if (urlStr.includes('/api/staff/tickets')) {
+    const params = new URL(urlStr, 'http://localhost').searchParams;
+    const search = params.get('search')?.toLowerCase() ?? '';
+    const ownerId = params.get('ownerId');
+    let filtered = queueTickets;
+    if (search) {
+      filtered = filtered.filter((t) => t.summary.toLowerCase().includes(search) || t.ticketNumber.toLowerCase().includes(search));
+    }
+    if (ownerId) {
+      filtered =
+        ownerId === 'unassigned'
+          ? filtered.filter((t) => t.ownerId === null)
+          : filtered.filter((t) => t.ownerId === Number(ownerId));
+    }
+    return Promise.resolve({
+      ok: true,
+      json: async () => ({
+        data: filtered,
+        pagination: { page: 1, pageSize: 10, total: filtered.length, totalPages: 1 },
+      }),
+    } as Response);
+  }
+  return Promise.resolve({ ok: false, json: async () => ({}) } as Response);
+}
+
+function renderQueue() {
+  return render(
+    <MemoryRouter initialEntries={['/staff/queue']}>
+      <AuthProvider>
+        <StaffTicketQueue />
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
+// Renders the Queue alongside a stand-in destination route, so a click that
+// navigates to /staff/tickets/:id (I-7's real detail screen) can be
+// observed without pulling in the full StaffTicketDetail component here.
+function renderQueueWithDetailRoute() {
+  return render(
+    <MemoryRouter initialEntries={['/staff/queue']}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/staff/queue" element={<StaffTicketQueue />} />
+          <Route path="/staff/tickets/:id" element={<div data-testid="detail-route-stub">Detail route reached</div>} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
+describe('IT Staff Ticket Queue (UI-03, UI-04, UI-05)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    queueTickets = [baseTicket];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(mockFetchImpl as typeof fetch);
+  });
+
+  it('UI-03a: renders the desktop table with ticket rows and correct badges', async () => {
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('Printer offline on 3rd floor').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Unassigned').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('URGENT').length).toBeGreaterThan(0);
+  });
+
+  it('UI-04: shows owner name for an assigned ticket instead of Unassigned', async () => {
+    queueTickets = [{ ...baseTicket, ownerId: 99, ownerName: 'Sam Rivera' }];
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('Sam Rivera').length).toBeGreaterThan(0);
+  });
+
+  it('UI-03b: renders an empty-queue state when there are no tickets at all', async () => {
+    queueTickets = [];
+    renderQueue();
+    await waitFor(() => expect(screen.getByText(/No tickets in the queue yet/i)).toBeInTheDocument());
+  });
+
+  it('UI-03c: renders a no-results state with Clear Filters after searching to nothing', async () => {
+    queueTickets = [baseTicket];
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByLabelText(/SEARCH/i), { target: { value: 'nonexistent-xyz' } });
+
+    await waitFor(() => expect(screen.getByText(/No tickets match your filters/i)).toBeInTheDocument(), { timeout: 2000 });
+    expect(screen.getAllByRole('button', { name: /Clear Filters/i }).length).toBeGreaterThan(0);
+  });
+
+  it('UI-03d: search interaction calls the API with the search query', async () => {
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByLabelText(/SEARCH/i), { target: { value: 'Printer' } });
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.some((c) => String(c[0]).includes('search=Printer'))).toBe(true);
+    });
+  });
+
+  it('UI-05: renders ticket cards (not the desktop table) on a mobile-width viewport', async () => {
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+    expect(screen.getAllByTestId('ticket-card').length).toBeGreaterThan(0);
+  });
+
+  it('UI-03g: hides the previous rows while a new filter loads and if that request fails', async () => {
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText(baseTicket.ticketNumber).length).toBeGreaterThan(0));
+
+    let resolveRequest!: (response: Response) => void;
+    const delayedFailure = new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    });
+    vi.mocked(globalThis.fetch).mockImplementation((url) =>
+      String(url).includes('status=CLOSED') ? delayedFailure : mockFetchImpl(url)
+    );
+
+    fireEvent.change(screen.getByLabelText('STATUS'), { target: { value: 'CLOSED' } });
+    await waitFor(() => expect(screen.getAllByTestId('skeleton-row')).toHaveLength(5));
+    expect(screen.queryByText(baseTicket.ticketNumber)).not.toBeInTheDocument();
+
+    resolveRequest({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: { message: 'Queue unavailable' } }),
+    } as Response);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Queue unavailable');
+    expect(screen.queryByText(baseTicket.ticketNumber)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+  });
+
+  it('UI-05: mobile ticket cards are keyboard-operable links', async () => {
+    const user = userEvent.setup();
+    renderQueueWithDetailRoute();
+    await waitFor(() => expect(screen.getAllByTestId('ticket-card').length).toBeGreaterThan(0));
+
+    const card = screen.getAllByTestId('ticket-card')[0];
+    expect(card.tagName).toBe('A');
+    expect(card).toHaveAttribute('href');
+    card.focus();
+    await user.keyboard('{Enter}');
+
+    expect(await screen.findByTestId('detail-route-stub')).toBeInTheDocument();
+  });
+
+  it('UI-04: sortable column headers expose button controls that work by keyboard', async () => {
+    const user = userEvent.setup();
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    const lastUpdatedSortButton = screen.getByRole('button', { name: /Last Updated/i });
+    const header = lastUpdatedSortButton.closest('th');
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    lastUpdatedSortButton.focus();
+    await user.keyboard('{Enter}');
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+  });
+
+  // Added in review of PR #67 (item 1): the "Open" button previously
+  // navigated to a route App.tsx never defined, silently falling through
+  // to the Requester workspace. I-7 (Issue #56) has since built that real
+  // route/screen (StaffTicketDetail), so the default action now navigates
+  // there instead of opening the read-only modal that was I-6's stopgap.
+  it("item-1 (superseded by I-7): clicking a row's Open button navigates to the real Staff Ticket Detail route", async () => {
+    renderQueueWithDetailRoute();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    const openButtons = screen.getAllByRole('button', { name: 'Open' });
+    fireEvent.click(openButtons[0]);
+
+    await waitFor(() => expect(screen.getByTestId('detail-route-stub')).toBeInTheDocument());
+  });
+
+  it('onOpenTicket, when passed, fires with the clicked ticket id instead of navigating (it is a bare callback, not a preserved modal)', async () => {
+    const onOpenTicket = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/staff/queue']}>
+        <AuthProvider>
+          <StaffTicketQueue onOpenTicket={onOpenTicket} />
+        </AuthProvider>
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    const openButtons = screen.getAllByRole('button', { name: 'Open' });
+    fireEvent.click(openButtons[0]);
+
+    expect(onOpenTicket).toHaveBeenCalledWith(baseTicket.id);
+    expect(screen.queryByTestId('ticket-detail-modal')).not.toBeInTheDocument();
+  });
+
+  // Added in review of PR #67 (item 2): the Owner filter previously only
+  // offered "All" and "unassigned" even though the API and spec support a
+  // specific per-staff-member ownerId. This asserts the picker is
+  // populated from GET /api/staff/members and that selecting a member
+  // sends the right ownerId query param.
+  it('item-2: Owner picker is populated with staff members and selecting one filters by ownerId', async () => {
+    queueTickets = [baseTicket, { ...baseTicket, id: 2, ticketNumber: 'TKT-2026-000202', ownerId: 10, ownerName: 'Sam Rivera' }];
+    renderQueue();
+    await waitFor(() => expect(screen.getAllByText('TKT-2026-000201').length).toBeGreaterThan(0));
+
+    const ownerSelect = screen.getByLabelText(/OWNER/i) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(Array.from(ownerSelect.options).map((o) => o.textContent)).toEqual(
+        expect.arrayContaining(['All', 'Unassigned', 'Sam Rivera', 'Alex Chen'])
+      );
+    });
+
+    fireEvent.change(ownerSelect, { target: { value: '10' } });
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      expect(calls.some((c) => String(c[0]).includes('ownerId=10'))).toBe(true);
+    });
+  });
+});

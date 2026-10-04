@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import App from "../../src/App";
 import * as api from "../../src/api";
@@ -9,10 +9,21 @@ describe("App & Lab 1 API Client", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the TokTickIT brand and navigation", () => {
+  it("renders the TokTickIT brand — redirecting an unauthenticated visitor to Login (I-4: AC-15)", async () => {
+    // No session cookie -> GET /api/auth/me returns 401 -> App's router
+    // redirects to /login, whose own screen also carries the brand.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url: RequestInfo | URL) => {
+      if (String(url).includes("/api/auth/me")) {
+        return { ok: false, status: 401, json: async () => ({}) } as Response;
+      }
+      return { ok: false, status: 404 } as Response;
+    });
+
     render(<App />);
-    const brandElements = screen.getAllByText(/TokTickIT/i);
-    expect(brandElements.length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => {
+      const brandElements = screen.getAllByText(/TokTickIT/i);
+      expect(brandElements.length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   it("checkSystem returns online and categories on success", async () => {

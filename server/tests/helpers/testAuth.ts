@@ -1,0 +1,179 @@
+import request from "supertest";
+import { getPrisma } from "../../src/prisma.js";
+import { hashPassword } from "../../src/utils/password.js";
+import { Role } from "@prisma/client";
+
+// `app` is imported lazily (inside each loginAsRegression*() below) rather
+// than at module top level. app.ts uses `import.meta.url` (for its ESM
+// __dirname equivalent), which is fine under Vitest's real ESM runtime but
+// breaks when this file is imported from Playwright's own TS transform
+// (e2e/lab-03/global-setup.ts, added in review of PR #70, item 1) — that
+// loader runs this repo's TS as CommonJS since the root package.json has no
+// "type": "module", and `import.meta` throws a SyntaxError there. Global
+// setup only ever calls the ensureRegression*() functions below, never the
+// loginAsRegression*() ones, so keeping the `app` import out of this file's
+// top level lets global setup import this module without ever touching
+// app.ts at all.
+
+// Shared test-fixture accounts for the Lab 1/2 regression suites, which
+// need a real, logged-in, mustChangePassword=false Requester to exercise
+// the now-session-scoped Ticket/Attachment routes (I-4). Kept separate
+// from the real seed data in prisma/seed.ts so re-running tests never
+// depends on, or perturbs, that data's mustChangePassword/password state.
+export const REGRESSION_REQUESTER_EMAIL = "regression-suite-requester@toktick.internal";
+export const REGRESSION_REQUESTER_PASSWORD = "RegressionTest123";
+
+export async function ensureRegressionRequester() {
+  const prisma = getPrisma();
+  const user = await prisma.user.upsert({
+    where: { email: REGRESSION_REQUESTER_EMAIL },
+    update: { isActive: true, mustChangePassword: false, passwordHash: hashPassword(REGRESSION_REQUESTER_PASSWORD) },
+    create: {
+      name: "Regression Suite Requester",
+      email: REGRESSION_REQUESTER_EMAIL,
+      department: "QA",
+      role: Role.REQUESTER,
+      passwordHash: hashPassword(REGRESSION_REQUESTER_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+  return user;
+}
+
+/** Returns a supertest agent already logged in as the regression requester. */
+export async function loginAsRegressionRequester() {
+  await ensureRegressionRequester();
+  const { app } = await import("../../src/app.js");
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_REQUESTER_EMAIL,
+    password: REGRESSION_REQUESTER_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression requester: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}
+
+// A second, entirely separate fixture account for "some other Requester"
+// scenarios (cross-requester 404 masking tests). Fixed in review: an
+// earlier version of this had those tests pick a random real seeded
+// REQUESTER and temporarily flip its mustChangePassword flag, which could
+// race with another test file doing the same thing to the same account
+// (e.g. Jennifer Anderson) under Vitest's default cross-file parallelism —
+// one test's mid-request restore could flip the flag while another test's
+// request was in flight, producing an intermittent 403 instead of the
+// asserted 404. A dedicated fixture with mustChangePassword already false
+// removes the shared mutable state entirely, not just the race window.
+export const REGRESSION_OTHER_REQUESTER_EMAIL = "regression-suite-other-requester@toktick.internal";
+export const REGRESSION_OTHER_REQUESTER_PASSWORD = "RegressionTest456";
+
+export async function ensureRegressionOtherRequester() {
+  const prisma = getPrisma();
+  return prisma.user.upsert({
+    where: { email: REGRESSION_OTHER_REQUESTER_EMAIL },
+    update: { isActive: true, mustChangePassword: false, passwordHash: hashPassword(REGRESSION_OTHER_REQUESTER_PASSWORD) },
+    create: {
+      name: "Regression Suite Other Requester",
+      email: REGRESSION_OTHER_REQUESTER_EMAIL,
+      department: "QA",
+      role: Role.REQUESTER,
+      passwordHash: hashPassword(REGRESSION_OTHER_REQUESTER_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+}
+
+/** Returns a supertest agent already logged in as the "someone else" fixture requester. */
+export async function loginAsRegressionOtherRequester() {
+  await ensureRegressionOtherRequester();
+  const { app } = await import("../../src/app.js");
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_OTHER_REQUESTER_EMAIL,
+    password: REGRESSION_OTHER_REQUESTER_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression other requester: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}
+
+// Dedicated fixture account for IT Staff Ticket Queue (I-6) and other
+// staff-only route tests. Same rationale as the Requester fixtures above —
+// a dedicated account with mustChangePassword already false, kept separate
+// from prisma/seed.ts data.
+export const REGRESSION_STAFF_EMAIL = "regression-suite-staff@toktick.internal";
+export const REGRESSION_STAFF_PASSWORD = "RegressionTest789";
+
+export async function ensureRegressionStaff() {
+  const prisma = getPrisma();
+  return prisma.user.upsert({
+    where: { email: REGRESSION_STAFF_EMAIL },
+    update: { isActive: true, mustChangePassword: false, role: Role.IT_STAFF, passwordHash: hashPassword(REGRESSION_STAFF_PASSWORD) },
+    create: {
+      name: "Regression Suite Staff",
+      email: REGRESSION_STAFF_EMAIL,
+      department: "IT",
+      role: Role.IT_STAFF,
+      passwordHash: hashPassword(REGRESSION_STAFF_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+}
+
+/** Returns a supertest agent already logged in as the regression IT Staff fixture. */
+export async function loginAsRegressionStaff() {
+  await ensureRegressionStaff();
+  const { app } = await import("../../src/app.js");
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_STAFF_EMAIL,
+    password: REGRESSION_STAFF_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression staff: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}
+
+// Dedicated fixture account for I-7's staff-ticket-detail routes and the
+// I-8 admin routes (Administrator side of the §6 authorization grid). Same
+// rationale as the other regression fixtures above.
+export const REGRESSION_ADMIN_EMAIL = "regression-suite-admin@toktick.internal";
+export const REGRESSION_ADMIN_PASSWORD = "RegressionTest012";
+
+export async function ensureRegressionAdmin() {
+  const prisma = getPrisma();
+  return prisma.user.upsert({
+    where: { email: REGRESSION_ADMIN_EMAIL },
+    update: { isActive: true, mustChangePassword: false, role: Role.ADMINISTRATOR, passwordHash: hashPassword(REGRESSION_ADMIN_PASSWORD) },
+    create: {
+      name: "Regression Suite Admin",
+      email: REGRESSION_ADMIN_EMAIL,
+      department: "IT",
+      role: Role.ADMINISTRATOR,
+      passwordHash: hashPassword(REGRESSION_ADMIN_PASSWORD),
+      mustChangePassword: false,
+      isActive: true,
+    },
+  });
+}
+
+/** Returns a supertest agent already logged in as the regression Administrator fixture. */
+export async function loginAsRegressionAdmin() {
+  await ensureRegressionAdmin();
+  const { app } = await import("../../src/app.js");
+  const agent = request.agent(app);
+  const res = await agent.post("/api/auth/login").send({
+    email: REGRESSION_ADMIN_EMAIL,
+    password: REGRESSION_ADMIN_PASSWORD,
+  });
+  if (res.status !== 200) {
+    throw new Error(`Failed to log in as regression admin: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return agent;
+}
