@@ -9,6 +9,7 @@ import {
   REGRESSION_STAFF_PASSWORD,
   apiLogin,
   createForcedChangeUser,
+  createFreshTicketAsRequester,
   createFreshTicketWithAttachmentAsRequester,
 } from "./api-fixtures";
 
@@ -70,6 +71,7 @@ async function auditEveryVisibleTabStop(page: Page, screen: string, scope: Locat
 
   const visited = new Set<number>();
   const focusIssues: string[] = [];
+  const unexpectedTabStops: string[] = [];
   for (let step = 0; step < targets.length + 2 && visited.size < targets.length; step += 1) {
     await page.keyboard.press("Tab");
     const state = await page.evaluate((attribute) => {
@@ -78,13 +80,19 @@ async function auditEveryVisibleTabStop(page: Page, screen: string, scope: Locat
       const style = getComputedStyle(element);
       return {
         target: element.getAttribute(attribute),
+        label: element.getAttribute("aria-label") || element.id || element.tagName.toLowerCase(),
         focusVisible: element.matches(":focus-visible"),
         hasIndicator: (style.outlineStyle !== "none" && parseFloat(style.outlineWidth) > 0)
           || style.boxShadow !== "none",
       };
     }, auditAttribute);
 
-    if (state?.target === null || state === null) continue;
+    if (state?.target == null) {
+      // Chromium may focus <body> for one Tab at the document boundary.
+      // It is not a control; all other unlisted stops must be reported.
+      if (state?.label !== "body") unexpectedTabStops.push(state?.label ?? "no active element");
+      continue;
+    }
     const targetIndex = Number(state.target);
     if (!Number.isInteger(targetIndex)) continue;
     visited.add(targetIndex);
@@ -96,6 +104,7 @@ async function auditEveryVisibleTabStop(page: Page, screen: string, scope: Locat
 
   const unreachable = targets.filter((target) => !visited.has(target.index)).map((target) => target.label);
   expect(unreachable, `${screen} controls should all be reachable by Tab`).toEqual([]);
+  expect(unexpectedTabStops, `${screen} should not skip unlisted Tab stops`).toEqual([]);
   expect(focusIssues, `${screen} controls should all show a visible keyboard focus indicator`).toEqual([]);
 
   await scope.evaluate((container, attribute) => {
@@ -215,6 +224,27 @@ test.describe("Visual inspection checklist — status badge palette", () => {
       });
     }
   });
+
+  test("long status text fits the badge at the 992px desktop breakpoint", async ({ page }) => {
+    await page.setViewportSize({ width: 992, height: 900 });
+    await login(page, REGRESSION_STAFF_EMAIL, REGRESSION_STAFF_PASSWORD);
+    await page.goto("/staff/queue");
+    await page.locator("#queue-status").selectOption("WAITING_FOR_REQUESTER");
+
+    const badge = page.locator(".queue-data-table--desktop [data-status='WAITING_FOR_REQUESTER']").first();
+    await expect(badge).toBeVisible();
+    const bounds = await badge.evaluate((element) => {
+      const badgeBounds = element.getBoundingClientRect();
+      const cellBounds = element.closest("td")!.getBoundingClientRect();
+      return {
+        badgeRight: badgeBounds.right,
+        cellRight: cellBounds.right,
+        textFits: element.scrollWidth <= element.clientWidth,
+      };
+    });
+    expect(bounds.badgeRight).toBeLessThanOrEqual(bounds.cellRight + 1);
+    expect(bounds.textFits).toBe(true);
+  });
 });
 
 test.describe("Visual inspection checklist — role-specific shell and landing routes", () => {
@@ -222,7 +252,9 @@ test.describe("Visual inspection checklist — role-specific shell and landing r
     await login(page, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
     await page.goto("/");
 
-    await expect(page.getByTestId("authenticated-user").getByTestId("role-badge")).toHaveText("Requester");
+    const requesterRole = page.getByTestId("authenticated-user").getByTestId("role-badge");
+    await expect(requesterRole).toHaveText("Requester");
+    await expect(requesterRole).toHaveCSS("background-color", "rgb(11, 122, 70)");
     await expect(page.getByRole("button", { name: /create ticket/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /my tickets/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /ticket queue/i })).toHaveCount(0);
@@ -238,7 +270,9 @@ test.describe("Visual inspection checklist — role-specific shell and landing r
     await page.goto("/");
 
     await expect(page).toHaveURL(/\/staff\/queue$/);
-    await expect(page.getByTestId("authenticated-user").getByTestId("role-badge")).toHaveText("IT Staff");
+    const staffRole = page.getByTestId("authenticated-user").getByTestId("role-badge");
+    await expect(staffRole).toHaveText("IT Staff");
+    await expect(staffRole).toHaveCSS("background-color", "rgb(29, 78, 216)");
     await expect(page.getByRole("link", { name: /ticket queue/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /user management/i })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /logout/i })).toBeVisible();
@@ -255,6 +289,7 @@ test.describe("Visual inspection checklist — role-specific shell and landing r
     await expect(page).toHaveURL(/\/staff\/queue$/);
     const navbarRole = page.getByTestId("authenticated-user").getByTestId("role-badge");
     await expect(navbarRole).toHaveText("Administrator");
+    await expect(navbarRole).toHaveCSS("background-color", "rgb(124, 45, 146)");
     await expect(page.getByRole("link", { name: /ticket queue/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /user management/i })).toBeVisible();
 
@@ -287,6 +322,7 @@ test("Forced password change controls show visible focus", async ({ page }) => {
 });
 
 test("Requester list, ticket creation, and ticket details expose visible focus on every Tab stop", async ({ page }) => {
+  const fixture = await createFreshTicketAsRequester();
   await login(page, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
@@ -303,7 +339,8 @@ test("Requester list, ticket creation, and ticket details expose visible focus o
   await page.setViewportSize({ width: 1280, height: 900 });
 
   await page.getByRole("button", { name: /my tickets/i }).click();
-  const ticketRow = page.getByRole("button", { name: /view details for ticket/i }).first();
+  await page.locator("#ticket-search").fill(fixture.ticketNumber);
+  const ticketRow = page.getByRole("button", { name: new RegExp(fixture.ticketNumber) });
   await expect(ticketRow).toBeVisible();
   await ticketRow.click();
   await expect(page.getByRole("button", { name: /edit ticket/i })).toBeVisible();
@@ -359,6 +396,7 @@ test("Attachment removal dialog contains focus, labels itself, and returns focus
     await dialog.getByRole("button", { name: /confirm removal/i }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByText("Soft-Removed", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("attachments-heading")).toBeFocused();
   } finally {
     const cleanup = await cleanupContext.delete(`/api/tickets/${fixture.id}/attachments/${fixture.attachmentId}`, {
       data: { reason: "E2E keyboard-focus fixture cleanup" },
@@ -438,20 +476,7 @@ test("Staff queue and ticket detail expose visible focus on every Tab stop", asy
 
   await openButton.click();
   await expect(page.locator("#it-priority-select")).toBeVisible();
-  const prioritySelect = page.locator("#it-priority-select");
-  const currentPriority = await prioritySelect.inputValue();
-  const alternatePriority = await prioritySelect.locator("option").evaluateAll((options, current) => {
-    const option = options.find((candidate) => (candidate as HTMLOptionElement).value !== current) as HTMLOptionElement | undefined;
-    return option?.value ?? null;
-  }, currentPriority);
-  expect(alternatePriority).not.toBeNull();
-  await prioritySelect.selectOption(alternatePriority!);
-
-  const statusSelect = page.locator("#status-select");
-  if (await statusSelect.count()) {
-    const nextStatus = await statusSelect.locator("option").nth(1).getAttribute("value");
-    if (nextStatus) await statusSelect.selectOption(nextStatus);
-  }
+  await expect(page.locator("#status-select")).toBeVisible();
   await page.locator("#new-comment").fill("Keyboard audit draft only");
   await page.locator("#new-note").fill("Keyboard audit draft only");
   await auditEveryVisibleTabStop(page, "Staff Ticket Detail");
@@ -504,15 +529,16 @@ test("Queue Unassigned label is visually and semantically distinct from the deta
 
   const unassignedLabel = page.getByTestId("unassigned-owner").first();
   await expect(unassignedLabel).toBeVisible();
-  const queueLabelBackground = await unassignedLabel.evaluate((element) => getComputedStyle(element).backgroundColor);
+  await expect(unassignedLabel).toHaveText("Unassigned");
+  await expect(unassignedLabel).toHaveJSProperty("tagName", "SPAN");
 
   await page.getByRole("button", { name: /open/i }).first().click();
   await expect(page).toHaveURL(/\/staff\/tickets\/\d+$/);
   const ownerSelect = page.locator("#owner-select");
   await expect(ownerSelect).toBeVisible();
   await expect(ownerSelect).toHaveValue("");
-  expect(await ownerSelect.evaluate((element) => element.tagName)).toBe("SELECT");
-  expect(await ownerSelect.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(queueLabelBackground);
+  await expect(ownerSelect).toHaveJSProperty("tagName", "SELECT");
+  await expect(ownerSelect).toBeEnabled();
 });
 
 test("Validation feedback follows each form's design: auth banners and admin field errors", async ({ page, browser }) => {
@@ -651,7 +677,7 @@ test.describe("Visual inspection checklist — editable vs read-only fields dist
     // IT Priority: a real, enabled <select>.
     const itPrioritySelect = page.locator("#it-priority-select");
     await expect(itPrioritySelect).toBeVisible();
-    expect(await itPrioritySelect.evaluate((el) => el.tagName)).toBe("SELECT");
+    await expect(itPrioritySelect).toHaveJSProperty("tagName", "SELECT");
   });
 });
 
@@ -724,7 +750,8 @@ test("sortable queue headers respond to keyboard activation", async ({ page }) =
 
   const sortButton = page.getByRole("button", { name: /ticket number/i }).first();
   await expect(sortButton).toBeVisible();
-  expect(await sortButton.evaluate((element) => element.closest("th")?.getAttribute("aria-sort"))).toBe("none");
+  const sortHeader = sortButton.locator("xpath=..");
+  await expect(sortHeader).toHaveAttribute("aria-sort", "none");
   let keyboardFocused = false;
   for (let attempt = 0; attempt < 20 && !keyboardFocused; attempt += 1) {
     await page.keyboard.press("Tab");
@@ -739,7 +766,7 @@ test("sortable queue headers respond to keyboard activation", async ({ page }) =
   expect(focusStyle.outlineStyle).not.toBe("none");
   expect(parseFloat(focusStyle.outlineWidth)).toBeGreaterThan(0);
   await page.keyboard.press("Enter");
-  expect(await sortButton.evaluate((element) => element.closest("th")?.getAttribute("aria-sort"))).toBe("descending");
+  await expect(sortHeader).toHaveAttribute("aria-sort", "descending");
   await page.keyboard.press("Enter");
-  expect(await sortButton.evaluate((element) => element.closest("th")?.getAttribute("aria-sort"))).toBe("ascending");
+  await expect(sortHeader).toHaveAttribute("aria-sort", "ascending");
 });

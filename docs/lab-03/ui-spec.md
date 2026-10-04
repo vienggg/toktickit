@@ -152,7 +152,8 @@ new screen listed above.
       correctly across the Requester workspace, Staff Queue/Detail, and
       Administrator Queue/Detail/User Management screens. Verified in
       `e2e/lab-03/visual-inspection.spec.ts` by signing in as all three roles,
-      checking their allowed destinations, and navigating through each
+      checking the computed badge background against each `--color-role-*`
+      value, checking allowed destinations, and navigating through each
       role's authenticated screens.
 - [x] Each status badge uses its declared background/text tokens in §1, rather
       than only differing from a Priority badge. Verified in
@@ -172,11 +173,12 @@ new screen listed above.
       asserting the Requested Priority container contains no
       `<select>`/`<input>` while `#it-priority-select` is a real, interactive
       `<select>`.
-- [x] The Queue's static "Unassigned" pill is distinguishable from the
-      editable Owner selector on Ticket Detail. Verified in
-      `e2e/lab-03/visual-inspection.spec.ts` by selecting an unassigned queue
-      row, then confirming the detail view renders an editable `<select>`
-      with a different appearance.
+- [x] The Queue shows "Unassigned" as a read-only label; Ticket Detail
+      offers an enabled Owner `<select>` for the same unassigned ticket.
+      Verified semantically in `e2e/lab-03/visual-inspection.spec.ts` by
+      selecting an unassigned queue row, opening it, and checking the label,
+      control type, and selected value. This does not claim a measured
+      visual-contrast threshold between the two controls.
 - [x] Validation feedback appears in the location specified for each form:
       Login and Change Password use an inline alert banner; Create/Edit User
       errors appear beneath the offending field. Verified in

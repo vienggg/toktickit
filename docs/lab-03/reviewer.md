@@ -23,7 +23,8 @@
 | [#67](https://github.com/vienggg/toktickit/pull/67) | feat(lab3): IT Staff Ticket Queue | `feature/lab3-staff-queue` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#68](https://github.com/vienggg/toktickit/pull/68) | feat(lab3): IT Staff Ticket Detail | `feature/lab3-staff-ticket-detail` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#69](https://github.com/vienggg/toktickit/pull/69) | feat(lab3): Administrator User Management | `feature/lab3-user-administration` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
-| [#70](https://github.com/vienggg/toktickit/pull/70) | feat(lab3): E2E specs, full screenshot manifest, visual inspection | `feature/lab3-e2e-and-visual` | `lab3-staging` | Changes Requested → Fixed → re-review pending |
+| [#70](https://github.com/vienggg/toktickit/pull/70) | feat(lab3): E2E specs, full screenshot manifest, visual inspection | `feature/lab3-e2e-and-visual` | `lab3-staging` | Changes Requested → Fixed → Merged 2026-09-18 |
+| [#71](https://github.com/vienggg/toktickit/pull/71) | Lab 3 release integration | `lab3-staging` | `main` | Changes Requested 2026-10-04; fixes in progress |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
@@ -372,10 +373,76 @@ what this document says.
 
 ---
 
+#### PR #71: Release integration — Changes Requested (@projectnewy, 2026-10-04 Bangkok time)
+
+> **Process correction:** Commit `047b5bf` (quality and accessibility audit)
+> was pushed directly to `lab3-staging` after PR #70 merged. It changed 22
+> files without a feature PR, contrary to the sprint's GitHub Flow rule.
+> This is a real workflow deviation; the release PR is the first PR where
+> those changes received peer review. Recording it here does not make the
+> direct push retroactively compliant. The release remains open while the
+> requested corrections are prepared on a separate feature branch.
+>
+> **Reviewer feedback:** Four blocking findings: the direct-to-staging
+> commit had not been recorded; the Staff Queue showed old, clickable rows
+> next to an error or during a new fetch; two checked UI-spec assertions
+> claimed evidence the tests did not supply; and the Administrator staff
+> ticket authorization wording changed without a recorded decision. The
+> review also identified tablet sizing/status clipping, incomplete status
+> badge coverage, missing focus and keyboard tests, incomplete traceability,
+> fragile or stateful E2E checks, an unrelated seed-upsert change, and test
+> users visible in screenshots. The full review is preserved on PR #71.
+>
+> **Authorization decision:** The pre-audit stakeholder paragraph said an
+> Administrator lacked IT Staff Ticket permissions by role alone, while the
+> authorization matrix already marked those operations as allowed for
+> Administrators. The API specification and `requireRole(IT_STAFF,
+> ADMINISTRATOR)` routes also allowed them. The audit made the stakeholder
+> wording match the existing explicit matrix: in this Lab 3 project,
+> Administrators may perform the listed staff ticket operations because the
+> matrix grants them, not because every Administrator inherently inherits
+> all IT Staff rights. This is a clarification of the existing implemented
+> rule, not a new permission introduced at release time. It should have
+> been reviewed in a feature PR before reaching staging.
+>
+> **Author response (local fixes, pending peer review):** The Staff Queue
+> now clears its row actions during reload/failure while keeping sortable
+> headers mounted so keyboard focus survives a sort; UI-03g covers the
+> loading/error regression. The role checklist now has computed-color
+> assertions for all three roles, and the Owner item describes only the
+> static-label versus enabled-select distinction that its test proves.
+> The tablet table no longer has a forced 1050px minimum; long status text
+> wraps within its badge, with a 992px browser assertion. Requester screens
+> now share `TicketStatusBadge`, including legacy `In_Progress`, and the
+> component test covers every status plus fallback values. Attachment
+> removal restores focus after the detail reload; its browser test asserts
+> that result. The test record now traces the visual checks, queue failure
+> case, badge variants, and seed behavior. The focus audit requires the
+> status selector and reports unlisted Tab stops other than Chromium's
+> document-body boundary; the Requester detail audit opens a freshly
+> created ticket by its number. Sort assertions use Playwright's retrying
+> locator checks. The user-list screenshots show a seeded staff account
+> through visible role/search filters, avoiding accumulated test accounts.
+>
+> **Seed decision and remaining scope:** The Requester seed upsert's empty
+> `update` was intentional: a seed rerun should not undo a person's edited
+> name, department, activation, role, or password. The `create` path still
+> sets the forced initial password. This change was included in the audit
+> commit without being called out and had no dedicated automated test.
+> Navbar/RoleHome behavior is covered by the browser role-navigation tests;
+> separate unit tests and extraction of the two modal focus traps remain
+> possible follow-ups, not claims of coverage in this release review.
+
+---
+
 ## 3. Reviewer Availability Agreement
 
 @NinjoMUDA and the author coordinated directly (outside this log) that PR
 review would continue alongside Lab 3 the same way it did for Lab 1 and Lab 2.
+The recorded GitHub reviews on PRs #65–#71 were submitted by @projectnewy;
+the relationship between that account and the earlier @NinjoMUDA agreement
+has not been independently verified, so this log uses the actual reviewing
+account on each PR entry.
 Eleven feature/docs branches are expected to move through
 `Backlog → Specified → Started → PR Review → Fixing → Done`, one active Issue
 at a time, with the author never merging their own PR.

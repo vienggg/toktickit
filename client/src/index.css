@@ -61,7 +61,7 @@
 .role-destination-link { text-decoration: none; }
 
 .queue-data-table {
-  min-width: 1050px;
+  width: 100%;
 }
 
 .queue-data-table--desktop {
@@ -92,6 +92,14 @@
 .queue-data-table--desktop td {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.queue-data-table .badge[data-status] {
+  display: inline-block;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
 
 .queue-data-table--desktop .queue-owner-name {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiFetch, parseApiError } from '../api';
 import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
+import { TicketStatusBadge } from './TicketStatusBadge';
 
 interface Attachment {
   id: number;
@@ -81,6 +82,8 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
   const removalDialogRef = useRef<HTMLDivElement>(null);
   const removalCancelButtonRef = useRef<HTMLButtonElement>(null);
   const removalDialogOpenerRef = useRef<HTMLElement | null>(null);
+  const attachmentsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const removalSucceededRef = useRef(false);
 
   // Public Comments state
   const [comments, setComments] = useState<PublicCommentData[]>([]);
@@ -204,10 +207,22 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
     return () => {
       document.removeEventListener('keydown', handleDialogKeyDown);
       const opener = removalDialogOpenerRef.current;
-      if (opener?.isConnected) opener.focus();
+      if (!removalSucceededRef.current) {
+        if (opener?.isConnected) opener.focus();
+        else attachmentsHeadingRef.current?.focus();
+      }
       removalDialogOpenerRef.current = null;
     };
   }, [targetAttachmentToRemove]);
+
+  // The successful removal re-fetch temporarily unmounts the detail view.
+  // Restore focus after it returns, because the removed button no longer exists.
+  useEffect(() => {
+    if (!isLoading && removalSucceededRef.current && attachmentsHeadingRef.current) {
+      attachmentsHeadingRef.current.focus();
+      removalSucceededRef.current = false;
+    }
+  }, [isLoading, ticket]);
 
   const closeAttachmentRemovalDialog = () => {
     setTargetAttachmentToRemove(null);
@@ -366,6 +381,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
         throw new Error('Failed to remove attachment');
       }
 
+      removalSucceededRef.current = true;
       setTargetAttachmentToRemove(null);
       setRemovalReason('');
       await fetchTicketDetail(isEditing);
@@ -384,21 +400,6 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
         return <span className="badge bg-info text-dark">🟡 Medium</span>;
       default:
         return <span className="badge bg-secondary">🟢 Low</span>;
-    }
-  };
-
-  const getStatusBadge = (s: string) => {
-    switch (s) {
-      case 'New':
-        return <span className="badge bg-primary">New</span>;
-      case 'In Progress':
-        return <span className="badge bg-warning text-dark">In Progress</span>;
-      case 'Resolved':
-        return <span className="badge bg-success">Resolved</span>;
-      case 'Closed':
-        return <span className="badge bg-dark">Closed</span>;
-      default:
-        return <span className="badge bg-light text-dark border">{s}</span>;
     }
   };
 
@@ -486,7 +487,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
           <div>
             <div className="d-flex align-items-center gap-2">
               <span className="fs-5 font-monospace fw-bold">{ticket.ticketNumber}</span>
-              {getStatusBadge(ticket.status)}
+              <TicketStatusBadge status={ticket.status} />
               {getPriorityBadge(ticket.priority)}
             </div>
             <small className="opacity-75">
@@ -671,7 +672,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
           {/* ATTACHMENT LIFECYCLE SECTION */}
           <div className="mt-4 pt-4 border-top">
             <div className="d-flex justify-content-between align-items-center mb-3">
-              <h6 className="fw-bold text-dark mb-0">
+              <h6 ref={attachmentsHeadingRef} tabIndex={-1} data-testid="attachments-heading" className="fw-bold text-dark mb-0">
                 📎 Attachments ({ticket.attachments.length} / 5)
               </h6>
               {ticket.attachments.length < 5 && (
@@ -738,6 +739,7 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
                         type="button"
                         className="btn btn-sm btn-outline-danger"
                         onClick={(event) => {
+                          removalSucceededRef.current = false;
                           removalDialogOpenerRef.current = event.currentTarget;
                           setTargetAttachmentToRemove(att);
                         }}
