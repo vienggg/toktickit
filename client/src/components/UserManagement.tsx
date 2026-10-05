@@ -291,7 +291,7 @@ export const UserManagement: React.FC = () => {
     [debouncedSearch, roleFilter]
   );
 
-  const { data: users, setData: setUsers, isLoading, error } = usePaginatedFetch<AdminUser[]>(fetchUsers, []);
+  const { data: users, setData: setUsers, isLoading, error, refresh: refreshUsers } = usePaginatedFetch<AdminUser[]>(fetchUsers, []);
 
   // Create User modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -324,8 +324,9 @@ export const UserManagement: React.FC = () => {
           }
           throw new Error(message);
         }
-        const created: AdminUser = await res.json();
-        setUsers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+        // The current list may still be loading from before this POST. Re-fetch
+        // after the write so an older snapshot cannot replace the new account.
+        refreshUsers();
         setShowCreateModal(false);
       },
       'User created.',

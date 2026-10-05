@@ -22,3 +22,8 @@ server/uploads/*
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# local report-build intermediates
+/tmp/pdfs/
+__pycache__/
+*.pyc

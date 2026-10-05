@@ -58,6 +58,10 @@ export function usePaginatedFetch<T>(fetchPage: (signal: AbortSignal) => Promise
   const [data, setData] = useState<T>(initial);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+
+  // Re-fetch after a write and abort any older list request it supersedes.
+  const refresh = useCallback(() => setRevision((current) => current + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,20 +70,20 @@ export function usePaginatedFetch<T>(fetchPage: (signal: AbortSignal) => Promise
       setError(null);
       try {
         const result = await fetchPage(controller.signal);
-        setData(result);
+        if (!controller.signal.aborted) setData(result);
       } catch (err: unknown) {
-        if (err instanceof Error && err.name !== 'AbortError') {
+        if (!controller.signal.aborted && err instanceof Error && err.name !== 'AbortError') {
           setError(err.message || 'Unable to load data right now.');
         }
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     })();
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchPage]);
+  }, [fetchPage, revision]);
 
-  return { data, setData, isLoading, error, setError } as const;
+  return { data, setData, isLoading, error, setError, refresh } as const;
 }
 
 export { parseApiError };
