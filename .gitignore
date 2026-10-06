@@ -25,5 +25,6 @@ server/uploads/*
 
 # local report-build intermediates
 /tmp/pdfs/
+/output/pdf/
 __pycache__/
 *.pyc

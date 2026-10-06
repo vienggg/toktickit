@@ -1,8 +1,10 @@
-"""Build the single Lab 3 submission PDF from the checked-in evidence.
+"""Build the single Lab 3 submission PDF locally from the project evidence.
 
 Run from the repository root with a Python environment containing ReportLab
 and Pillow. The builder deliberately marks unavailable post-I-11 evidence as
 pending; --final refuses to produce a submission until that evidence exists.
+The generated PDF is ignored by Git and submitted separately, not stored in
+the repository.
 """
 
 from __future__ import annotations
