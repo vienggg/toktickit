@@ -94,6 +94,7 @@ Security/Authorization · Migration/Regression · End-to-End.
 | UI-06 | UI Component | FR-15, FR-16, FR-17 | Staff Ticket Detail controls | Claim/reassign/IT Priority/status controls call the correct endpoints | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-07 | UI Style | §7 (ui-spec) | Public Comment vs Internal Note panel styling | Distinct background/label rendered for each panel | `client/tests/lab-03/StaffTicketDetail.test.tsx` | Pass |
 | UI-08 | UI Component | FR-20, FR-21, FR-22 | User Management list/create/edit forms | Search/filter call correct query; create/edit submit correct payloads; inline validation renders | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
+| UI-08i | UI Regression | FR-21 (found during I-11 main-branch E2E run) | Create User while an older filtered-list request is still in flight | A post-write refresh aborts the older request; its stale response cannot overwrite the list containing the new account | `client/tests/lab-03/usePaginatedFetch.test.tsx`; `e2e/lab-03/user-administration.spec.ts` | Pass on I-11 branch; main recheck pending merge |
 | UI-09 | UI Component | AC-12, AC-13 | Admin safety rules surfaced in UI | Self-deactivation and last-Admin attempts show an inline blocking message | `client/tests/lab-03/UserManagement.test.tsx` | Pass |
 | UI-10 | UI Component | FR-20 (added in review of PR #69 — item 9: no client test exercised RequireRole on a route this sensitive) | RequireRole guard on `/admin/users` | IT_STAFF and REQUESTER users are redirected away from `/admin/users` instead of it rendering; an ADMINISTRATOR user renders it normally | `client/tests/lab-03/ProtectedRoute.test.tsx` | Pass |
 | UI-11 | UI Resilience | Defensive rendering for API status values | Shared status badge on staff and Requester screens | All eight current statuses and five Lab 2 spellings map to the correct palette and preserve `data-status`; unknown values (including prototype property names) use the neutral fallback | `client/tests/lab-03/TicketStatusBadge.test.tsx` | Pass |
@@ -116,6 +117,24 @@ Security/Authorization · Migration/Regression · End-to-End.
 The 23 tests in `e2e/lab-03/visual-inspection.spec.ts` are grouped under
 VIS-01–VIS-06 by the specific checklist property they verify. They support
 the visual inspection record as well as the four end-to-end workflows above.
+
+### Release-snapshot verification and I-11 correction
+
+On 2026-10-05, the local checkout was detached at the exact `origin/main`
+merge commit `e48d2c8` before testing. `npm test` passed **251/251 server**
+tests (16 files) and **69/69 client** tests (11 files); the server and client
+production builds passed. The first `npx playwright test e2e/lab-03` run on
+that commit passed **29/30**. E2E-04 failed after `POST /api/admin/users`
+returned 201: an older GET started while the POST was pending, returned a
+pre-create snapshot, and replaced the just-created account in the UI. The
+trace records the overlapping requests; this was not reported as a pass.
+
+I-11 adds a post-write list refresh and guards against results from aborted
+requests. The new UI-08i unit regression passes, as do the existing User
+Management tests and TypeScript check. Re-running the browser suite on the
+I-11 branch passed **30/30**. A final browser run on `main` remains pending
+until the I-11 PR is reviewed and merged; the final report must state that
+result only after it is actually observed.
 
 ---
 

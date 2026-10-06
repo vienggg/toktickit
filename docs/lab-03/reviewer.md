@@ -1,7 +1,8 @@
 ﻿# Lab 3 — Peer Review Record
 
 **Author:** Garunyapas Danpitakkul (Student ID: 67070503404, GitHub: @vienggg)
-**Peer Reviewer:** Dechayut (Student ID: 67070503414, GitHub: @NinjoMUDA)
+**Recorded GitHub reviewer and merger:** [@projectnewy](https://github.com/projectnewy) (PRs #61–#72)
+**Originally designated course peer:** Dechayut (Student ID: 67070503414, GitHub: @NinjoMUDA). Whether this is the same person as @projectnewy has not been independently verified.
 **Partner Repository:** [https://github.com/NinjoMUDA/Dechayut_3414Lab1](https://github.com/NinjoMUDA/Dechayut_3414Lab1)
 **Project Repository:** [https://github.com/vienggg/toktickit](https://github.com/vienggg/toktickit)
 
@@ -10,7 +11,7 @@
 
 ---
 
-## 1. Pull Requests Authored (Reviewed & Merged by @NinjoMUDA)
+## 1. Pull Requests Authored (reviewed and merged by @projectnewy on GitHub)
 
 | PR # | Title | Feature Branch | Target Branch | Status & Verdict |
 |---|---|---|---|:---:|
@@ -24,18 +25,17 @@
 | [#68](https://github.com/vienggg/toktickit/pull/68) | feat(lab3): IT Staff Ticket Detail | `feature/lab3-staff-ticket-detail` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#69](https://github.com/vienggg/toktickit/pull/69) | feat(lab3): Administrator User Management | `feature/lab3-user-administration` | `lab3-staging` | Changes Requested → Fixed → Approved & Merged |
 | [#70](https://github.com/vienggg/toktickit/pull/70) | feat(lab3): E2E specs, full screenshot manifest, visual inspection | `feature/lab3-e2e-and-visual` | `lab3-staging` | Changes Requested → Fixed → Merged 2026-09-18 |
-| [#71](https://github.com/vienggg/toktickit/pull/71) | Lab 3 release integration | `lab3-staging` | `main` | Changes Requested 2026-10-04; fixes in progress |
+| [#72](https://github.com/vienggg/toktickit/pull/72) | fix(lab3): address PR #71 release review | `feature/lab3-release-review-fixes` | `lab3-staging` | Approved and merged 2026-10-05 01:00 ICT |
+| [#71](https://github.com/vienggg/toktickit/pull/71) | Lab 3 release integration | `lab3-staging` | `main` | Changes Requested, then Approved and merged 2026-10-05 01:01 ICT |
 
 *(Rows are appended, and PR numbers/links/verdicts filled in, as each Issue's
 PR is actually opened and reviewed. This table is never pre-filled with
 predicted outcomes.)*
 
-**Note on reviewer identity:** PRs #61 and #62 were reviewed and merged by the
-GitHub account **@projectnewy**, not @NinjoMUDA as named at the top of this
-document. This is recorded here factually and should be confirmed/reconciled
-before final submission — Part 1 grades "rendered reviewer.md with reviewer
-identity," so whichever account is doing the actual reviewing needs to match
-what this document says.
+**Note on reviewer identity:** The actual reviews and merges on GitHub were
+performed by **@projectnewy**. The original plan named Dechayut/@NinjoMUDA;
+the relationship between those identities is unverified, so this document
+does not claim they are the same person.
 
 ---
 
@@ -405,7 +405,7 @@ what this document says.
 > rule, not a new permission introduced at release time. It should have
 > been reviewed in a feature PR before reaching staging.
 >
-> **Author response (local fixes, pending peer review):** The Staff Queue
+> **Author response (reviewed in PR #72):** The Staff Queue
 > now clears its row actions during reload/failure while keeping sortable
 > headers mounted so keyboard focus survives a sort; UI-03g covers the
 > loading/error regression. The role checklist now has computed-color
@@ -433,13 +433,21 @@ what this document says.
 > separate unit tests and extraction of the two modal focus traps remain
 > possible follow-ups, not claims of coverage in this release review.
 
+> **Outcome:** @projectnewy approved PR #72 at commit `ab7495e` and merged it
+> into `lab3-staging` as `9a98cb5` on 2026-10-05 01:00 ICT. The same reviewer
+> then approved the updated release head `9a98cb5` and merged PR #71 into
+> `main` as `e48d2c8` on 2026-10-05 01:01 ICT. Issue #59 closed automatically.
+> The release tag `lab3-release` was subsequently created at `e48d2c8`.
+> This review records the earlier direct-to-staging deviation; it does not
+> retroactively turn that push into a feature PR.
+
 ---
 
 ## 3. Reviewer Availability Agreement
 
 @NinjoMUDA and the author coordinated directly (outside this log) that PR
 review would continue alongside Lab 3 the same way it did for Lab 1 and Lab 2.
-The recorded GitHub reviews on PRs #65–#71 were submitted by @projectnewy;
+The recorded GitHub reviews on PRs #61–#72 were submitted by @projectnewy;
 the relationship between that account and the earlier @NinjoMUDA agreement
 has not been independently verified, so this log uses the actual reviewing
 account on each PR entry.
