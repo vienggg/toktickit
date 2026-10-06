@@ -133,7 +133,7 @@ I-11 adds a post-write list refresh and guards against results from aborted
 requests. The new UI-08i unit regression passes, as do the existing User
 Management tests and TypeScript check. Re-running the browser suite on the
 I-11 branch passed **30/30**. A final browser run on `main` remains pending
-until the I-11 PR is reviewed and merged; the submitted PDF must state that
+until the I-11 PR is reviewed and merged; the final report must state that
 result only after it is actually observed.
 
 ---
