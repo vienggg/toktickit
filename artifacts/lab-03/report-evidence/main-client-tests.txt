@@ -1,0 +1,26 @@
+Checkout: detached origin/main at e48d2c8 (PR #71 merge)
+Command: cd client && npm test
+Exit code: 0
+Condensed from the observed terminal output: per-file results and totals are retained; individual slow-test timing lines are omitted.
+
+> toktickit-client@1.0.0 test
+> vitest run
+
+ RUN  v2.1.9 C:/Users/User/OneDrive/Desktop/softwareengineer/toktickit/client
+
+ ✓ tests/lab-03/TicketStatusBadge.test.tsx (14 tests)
+ ✓ tests/lab-03/ProtectedRoute.test.tsx (3 tests)
+ ✓ tests/lab-01/App.test.tsx (3 tests)
+ ✓ tests/lab-03/Login.test.tsx (4 tests)
+ ✓ tests/lab-03/ChangePassword.test.tsx (3 tests)
+ ✓ tests/lab-02/CreateTicket.test.tsx (2 tests)
+ ✓ tests/lab-02/TicketDetail.test.tsx (5 tests)
+ ✓ tests/lab-02/MyTickets.test.tsx (2 tests)
+ ✓ tests/lab-03/StaffTicketDetail.test.tsx (11 tests)
+ ✓ tests/lab-03/UserManagement.test.tsx (10 tests)
+ ✓ tests/lab-03/StaffTicketQueue.test.tsx (12 tests)
+
+ Test Files  11 passed (11)
+      Tests  69 passed (69)
+   Start at  01:09:37
+   Duration  4.57s
