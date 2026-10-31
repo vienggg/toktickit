@@ -57,10 +57,19 @@ export function isLegalTransition(from: TicketStatus, to: TicketStatus): boolean
 // ticket and then always get a 409 back from PATCH for that exact choice.
 // Both call sites now share this one helper instead of each re-deriving
 // "permitted transitions minus BR-17's IN_PROGRESS carve-out" independently.
-export function getPermittedTransitionsForTicket(status: TicketStatus, ownerId: number | null): TicketStatus[] {
-  const permitted = getPermittedTransitions(status);
+export function getPermittedTransitionsForTicket(
+  status: TicketStatus,
+  ownerId: number | null,
+  // Lab 4 (BR-19): RESOLVED is only offered once the resolution gate has no
+  // blockers. Optional so the Lab 3 two-argument callers keep their behaviour.
+  resolutionBlockers: readonly string[] = []
+): TicketStatus[] {
+  let permitted = getPermittedTransitions(status);
   if (ownerId === null) {
-    return permitted.filter((s) => s !== TicketStatus.IN_PROGRESS);
+    permitted = permitted.filter((s) => s !== TicketStatus.IN_PROGRESS);
+  }
+  if (resolutionBlockers.length > 0) {
+    permitted = permitted.filter((s) => s !== TicketStatus.RESOLVED);
   }
   return permitted;
 }
