@@ -18,7 +18,7 @@ Extends `docs/lab-03/api-spec.md`. Everything in Lab 3 (cookie session, `/api` p
 | 401 | No valid session |
 | 403 | Role not permitted (`FORBIDDEN`) or password change pending |
 | 404 | Not found, or masked because the Ticket belongs to another Requester (BR-04) |
-| 409 | Conflict: `STALE_UPDATE`, `ILLEGAL_TRANSITION`, `ILLEGAL_ACTION_TRANSITION`, `RESOLUTION_BLOCKED`, `TICKET_LOCKED`, `ACTION_LOCKED` |
+| 409 | Conflict: `STALE_UPDATE`, `ILLEGAL_TRANSITION`, `ILLEGAL_ACTION_TRANSITION`, `RESOLUTION_BLOCKED`, `OPEN_ACTIONS_BLOCK_CANCEL`, `TICKET_LOCKED`, `ACTION_LOCKED` |
 | 422 | `INVALID_ASSIGNEE` — well-formed request, unacceptable assignee |
 | 500 | `INTERNAL_ERROR` — generic message only |
 
@@ -189,7 +189,7 @@ Both endpoints are `GET`, return a fixed concise document (no Ticket collections
 | `GET /api/tickets` (Requester) | `status` additionally accepts `ACTIVE` (BR-29 set). Unknown values keep the Lab 3 behaviour (ignored). |
 | `GET /api/staff/tickets` | `status` additionally accepts `ACTIVE`; new `followUp=true` (Tickets with ≥ 1 non-cancelled action with follow-up required; any other value → 400). `ownerId=unassigned\|<id>` is unchanged. |
 
-Together these guarantee that each dashboard `href` leads to a list whose total equals the card count (AC-22).
+Together these guarantee that each filter-based dashboard `href` leads to a list whose total equals the card count (AC-22). The `#my-actions` anchor on *My Open Actions* is an on-page list capped at 5 rows and is excluded from that guarantee.
 
 ---
 

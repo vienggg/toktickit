@@ -197,7 +197,7 @@ See `ui-spec.md`. Dashboard is the landing page for every role; the Requester ar
 | AC-19 | Given a stale Ticket `expectedVersion`, when a status, owner or priority change is submitted, then 409 `STALE_UPDATE` returns the current Ticket and nothing changes. |
 | AC-20 | Given an illegal transition (Lab 3 behaviour, e.g. `NEW → RESOLVED`), then 409 `ILLEGAL_TRANSITION` with the permitted set is still returned. |
 | AC-21 | Given the Ticket Detail screen, then the status control lists only permitted destinations, explains why Resolve is unavailable, and refreshes the summary status after success. |
-| AC-22 | Given seeded data, when the staff dashboard loads, then every card equals the corresponding direct database query and every drill-down link opens a list whose row count equals the card. |
+| AC-22 | Given seeded data, when the staff dashboard loads, then every card equals the corresponding direct database query and every filter-based drill-down link (an `href` with query parameters) opens a list whose total equals the card. Anchor links to on-page lists (e.g. *My Open Actions*, which shows at most 5 rows) are excluded from the count-parity check. |
 | AC-23 | Given a Requester calling the staff dashboard, or staff/Administrator calling the Requester dashboard, then 403; unauthenticated then 401. |
 | AC-24 | Given a user with no matching data, then all counts are 0, all lists are empty and each card shows its empty message. |
 | AC-25 | Given an Administrator, then the staff dashboard includes user-account counts; for IT Staff they are absent. |
