@@ -1,5 +1,14 @@
 import { TicketStatus } from "@prisma/client";
 
+// Lab 4 (BR-29): "active" Tickets, used by the dashboards and the status=ACTIVE list filter.
+export const ACTIVE_TICKET_STATUSES: TicketStatus[] = [
+  TicketStatus.NEW,
+  TicketStatus.OPEN,
+  TicketStatus.IN_PROGRESS,
+  TicketStatus.WAITING_FOR_REQUESTER,
+  TicketStatus.REOPENED,
+];
+
 // BR-19, specification.md §6.5: the single source of truth for which
 // status transitions are legal. Exported as a plain data structure (not
 // buried inside the PATCH route handler) so:

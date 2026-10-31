@@ -5,8 +5,9 @@ import { TicketStatus } from "@prisma/client";
 import { app } from "../../src/app.js";
 import { getPrisma } from "../../src/prisma.js";
 import { STATUS_TRANSITIONS } from "../../src/utils/statusTransitions.js";
-import { loginAsRegressionStaff, loginAsRegressionAdmin, loginAsRegressionRequester, loginAsRegressionOtherRequester } from "../helpers/testAuth.js";
+import { loginAsRegressionStaff, loginAsRegressionRequester, loginAsRegressionOtherRequester } from "../helpers/testAuth.js";
 import { ensureLab4Users, loginAsSecondStaff, createTicket, createAction, validActionBody, type Lab4Users } from "../helpers/lab4.js";
+import { createLoggedInUser, withFreshAdmin } from "../helpers/lab4Dashboard.js";
 
 // WF-01..WF-11 (docs/lab-04/tests.md): resolution gate, cancel/reopen rules,
 // append-only history, stale updates and the permitted-transition fields.
@@ -23,7 +24,7 @@ describe("Ticket workflow API (WF-01..WF-11)", () => {
     [staffA, staffB, admin, requester, otherRequester] = await Promise.all([
       loginAsRegressionStaff(),
       loginAsSecondStaff(),
-      loginAsRegressionAdmin(),
+      Promise.resolve(undefined as unknown as SuperTestAgent),
       loginAsRegressionRequester(),
       loginAsRegressionOtherRequester(),
     ]);
@@ -141,7 +142,7 @@ describe("Ticket workflow API (WF-01..WF-11)", () => {
 
     const resolvedOnly = await createTicket({ requesterId: u.requesterId, status: "RESOLVED", ownerId: u.staffAId });
     expect((await setStatus(staffA, resolvedOnly.id, { status: "REOPENED" })).status).toBe(400);
-    expect((await setStatus(admin, resolvedOnly.id, { status: "REOPENED", reason: "Not actually fixed" })).status).toBe(200);
+    expect((await withFreshAdmin((a) => setStatus(a, resolvedOnly.id, { status: "REOPENED", reason: "Not actually fixed" }))).res.status).toBe(200);
   });
 
   it("WF-07: every cell of the 8x8 transition matrix behaves as documented", async () => {

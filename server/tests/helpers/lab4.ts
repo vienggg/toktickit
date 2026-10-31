@@ -68,7 +68,7 @@ export async function ensureLab4Users(): Promise<Lab4Users> {
     ensureRegressionOtherRequester(),
     ensureRegressionStaff(),
     ensureSecondStaff(),
-    ensureRegressionAdmin(),
+    getPrisma().user.findUnique({ where: { email: "regression-suite-admin@toktick.internal" } }).then((a) => a ?? ensureRegressionAdmin()),
     ensureInactiveStaff(),
   ]);
   return {
@@ -91,6 +91,8 @@ export async function createTicket(opts: {
   createdAt?: Date;
   resolvedAt?: Date | null;
   closedAt?: Date | null;
+  itPriority?: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
+  requesterResolvedAt?: Date | null;
 }) {
   const prisma = getPrisma();
   const category = await prisma.category.findFirstOrThrow();
@@ -108,6 +110,8 @@ export async function createTicket(opts: {
       createdAt: opts.createdAt,
       resolvedAt: opts.resolvedAt ?? null,
       closedAt: opts.closedAt ?? null,
+      itPriority: opts.itPriority ?? "MEDIUM",
+      requesterResolvedAt: opts.requesterResolvedAt ?? null,
     },
   });
 }
