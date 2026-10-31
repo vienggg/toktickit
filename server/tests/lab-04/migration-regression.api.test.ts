@@ -128,3 +128,53 @@ describe("Lab 4 migration and regression (MIG-01..MIG-06)", () => {
     expect(await prisma.ticketStatusHistory.count()).toBeGreaterThan(0);
   });
 });
+
+// Added in the fix for the review of PR #86: migration 5 first shipped with only
+// one of its six foreign keys, so these tests pin every FK (and its delete rule)
+// and fail on any drift between migrations and schema.prisma.
+describe("Lab 4 migration integrity (MIG-07, MIG-08)", () => {
+  it("MIG-07: all six foreign keys exist with the documented delete rules", async () => {
+    const prisma = getPrisma();
+    const rows = await prisma.$queryRaw<Array<{ conname: string; deltype: string }>>`
+      SELECT c.conname AS conname, c.confdeltype::text AS deltype
+      FROM pg_constraint c
+      WHERE c.contype = 'f' AND c.conrelid IN ('"ActionTaken"'::regclass, '"TicketStatusHistory"'::regclass)
+    `;
+    const found = Object.fromEntries(rows.map((r) => [r.conname, r.deltype]));
+    // 'r' = RESTRICT, 'n' = SET NULL (pg_constraint.confdeltype)
+    expect(found).toEqual({
+      ActionTaken_ticketId_fkey: "r",
+      ActionTaken_createdById_fkey: "r",
+      ActionTaken_assigneeId_fkey: "r",
+      ActionTaken_updatedById_fkey: "n",
+      TicketStatusHistory_ticketId_fkey: "r",
+      TicketStatusHistory_changedById_fkey: "r",
+    });
+  });
+
+  it("MIG-08: the live database has no drift from schema.prisma", () => {
+    const prismaCli = path.join(serverDir, "node_modules", "prisma", "build", "index.js");
+    const run = () =>
+      execFileSync(
+        process.execPath,
+        [prismaCli, "migrate", "diff", "--from-schema-datasource", "prisma/schema.prisma", "--to-schema-datamodel", "prisma/schema.prisma", "--exit-code"],
+        { cwd: serverDir, stdio: "pipe" },
+      );
+    expect(run).not.toThrow(); // exit code 2 (drift) makes execFileSync throw
+  }, 60_000);
+
+  it("MIG-09: a database row cannot reference a missing user or ticket", async () => {
+    const prisma = getPrisma();
+    const ticket = await prisma.ticket.findFirstOrThrow({ select: { id: true, ownerId: true } });
+    await expect(
+      prisma.actionTaken.create({
+        data: { ticketId: ticket.id, actionAt: new Date(), description: "orphan", createdById: 2_000_000_000, assigneeId: 2_000_000_000 },
+      }),
+    ).rejects.toThrow(/Foreign key constraint/i);
+    await expect(
+      prisma.ticketStatusHistory.create({
+        data: { ticketId: 2_000_000_000, fromStatus: "NEW", toStatus: "OPEN", changedById: ticket.ownerId ?? 1 },
+      }),
+    ).rejects.toThrow(/Foreign key constraint/i);
+  });
+});
