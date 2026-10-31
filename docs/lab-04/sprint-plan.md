@@ -7,6 +7,8 @@
 **Starting point:** `main` @ `78ed025` (tag `lab3-release`), working tree clean.
 **Revision:** v1 — 2026-10-31
 
+> **Status:** historical working plan. Where it differs from `specification.md`, `api-spec.md` or `ui-spec.md`, **those documents are the source of truth** (e.g. drill-down hrefs use `ownerId=` and `status=ACTIVE`; the dashboard performance smoke threshold is 500 ms).
+>
 > This is a working plan, not a graded artifact. The graded artifacts are
 > `specification.md`, `api-spec.md`, `ui-spec.md`, `tests.md`, `reviewer.md`,
 > `ai-use.md`, the code, and the single submitted PDF (labsheet §14).
@@ -168,8 +170,8 @@ Lab 3 matrix stays; Lab 4 adds role columns and gates.
 
 | Metric | Query | Drill-down |
 |---|---|---|
-| Unassigned | ownerId null AND active | `/staff/queue?owner=unassigned` |
-| My Owned Tickets | ownerId = me AND active | `/staff/queue?owner=me` |
+| Unassigned | ownerId null AND active | `/staff/queue?ownerId=unassigned&status=ACTIVE` |
+| My Owned Tickets | ownerId = me AND active | `/staff/queue?ownerId=<my id>&status=ACTIVE` |
 | My Open Actions | ActionTaken.assigneeId = me AND status ∈ {PLANNED, IN_PROGRESS} | list → `/staff/tickets/:id#actions` |
 | Follow-ups Pending | followUpRequired AND ticket active | `/staff/queue?followUp=true` |
 | By Status (8 counts) | groupBy status | `/staff/queue?status=X` |
@@ -265,7 +267,7 @@ Order reasoning: I-1 must merge before I-3 starts (Part 2 evidence). I-4 depends
 | UI component | `StaffDashboard`, `RequesterDashboard`, `ActionsTaken`, `TicketWorkflow` `.test.tsx` | loading / empty / error / forbidden states, links point at right drill-down, follow-up field toggling, only permitted transitions rendered, form keeps data after failure |
 | UI style / responsive / a11y | Playwright visual spec | no horizontal overflow at 375/768/1280, focus visible, axe check on Lab 4 screens |
 | E2E | `actions-taken-flow`, `ticket-resolution`, `dashboards` `.spec.ts` | full lifecycle New → Resolved → Closed and → Cancelled; two staff add actions to one ticket; dashboard card click lands on filtered list |
-| Performance smoke | `dashboards.perf.test.ts` | dashboard endpoints < 300 ms on seeded DB |
+| Performance smoke | `dashboards.perf.test.ts` | dashboard endpoints < 500 ms on seeded DB |
 | Regression | all lab-01..03 suites | must stay green unchanged in intent |
 
 ---
