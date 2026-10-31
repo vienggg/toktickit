@@ -1,7 +1,7 @@
 # Lab 4 — Peer Review Record
 
 **Author:** Garunyapas Danpitakkul (Student ID: 67070503404, GitHub: @vienggg)
-**Reviewer:** Phuttipong Phankitnirundorn (Student ID: 67070503430), reviewing through his AI review agent ("phut-ai"); reviews and merges appear on GitHub under [@projectnewy](https://github.com/projectnewy). The author never merges their own PR.
+**Reviewer:** Phuttipong Phankitnirundorn (Student ID: 67070503430), reviewing through their AI review agent ("phut-ai"); reviews and merges appear on GitHub under [@projectnewy](https://github.com/projectnewy). The author never merges their own PR.
 **Peer whose PRs the author reviews:** Dechayut Panyawutvorakul (Student ID: 67070503414, GitHub: [@NinjoMUDA](https://github.com/NinjoMUDA)), repository [NinjoMUDA/Dechayut_3414Lab1](https://github.com/NinjoMUDA/Dechayut_3414Lab1).
 **Project Repository:** https://github.com/vienggg/toktickit
 **Flow:** `feature/*` → `lab4-staging` → `main` (release PR, tag `lab4-release`)
