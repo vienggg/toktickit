@@ -21,8 +21,8 @@ test.describe("E2E-01: full session lifecycle", () => {
     // AC-01: successful login reaches the application shell (Requester's
     // default screen is My Tickets, per client/src/App.tsx's
     // RequesterWorkspace defaulting activeTab to 'list').
-    await expect(page.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
-    await expect(page).toHaveURL(/\/$|\/\?/);
+    await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible(); // Lab 4 D-17: every role lands on its Dashboard
+    await expect(page).toHaveURL(/\/dashboard$/);
     await shoot(page, "authentication", "Figure-login-success", "all");
 
     // AC-07: logout ends the session.
@@ -58,13 +58,13 @@ test.describe("E2E-02: initial password login and change", () => {
 
     // On success: redirect into the application shell (My Tickets, since
     // this fixture user is a REQUESTER).
-    await expect(page.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible(); // Lab 4 D-17: every role lands on its Dashboard
     await expect(page).not.toHaveURL(/\/change-password/);
     await shoot(page, "authentication", "Figure-change-password-success", "desktop");
 
     // Confirm normal app access afterward: a reload stays on the app shell
     // rather than bouncing back to Change Password.
     await page.reload();
-    await expect(page.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible(); // Lab 4 D-17: the Dashboard
   });
 });

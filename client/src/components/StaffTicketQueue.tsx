@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { apiFetch, parseApiError } from '../api';
 import { useDebouncedValue, useCategoryOptions, usePaginatedFetch, useStaffMembers, formatDate } from '../hooks/usePaginatedFetch';
 import { Navbar } from './Navbar';
@@ -91,17 +91,21 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
 
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [status, setStatus] = useState('All');
-  const [itPriority, setItPriority] = useState('All');
+  // Lab 4: dashboard drill-down links open this screen with the filter already
+  // applied, e.g. /staff/queue?ownerId=7&status=ACTIVE (api-spec §3).
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState(searchParams.get('status') ?? 'All');
+  const [itPriority, setItPriority] = useState(searchParams.get('itPriority') ?? 'All');
   const [categoryId, setCategoryId] = useState('All');
-  const [ownerFilter, setOwnerFilter] = useState('All'); // 'All' | 'unassigned' | userId
+  const [ownerFilter, setOwnerFilter] = useState(searchParams.get('ownerId') ?? 'All'); // 'All' | 'unassigned' | userId
+  const [followUpOnly, setFollowUpOnly] = useState(searchParams.get('followUp') === 'true');
   const [sort, setSort] = useState<QueueSortField>('updatedAt');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
   const hasActiveFilters =
-    debouncedSearch.trim() !== '' || status !== 'All' || itPriority !== 'All' || categoryId !== 'All' || ownerFilter !== 'All';
+    debouncedSearch.trim() !== '' || status !== 'All' || itPriority !== 'All' || categoryId !== 'All' || ownerFilter !== 'All' || followUpOnly;
 
   const fetchQueuePage = useCallback(
     async (signal: AbortSignal): Promise<QueuePage> => {
@@ -116,6 +120,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
       if (itPriority !== 'All') params.append('itPriority', itPriority);
       if (categoryId !== 'All') params.append('categoryId', categoryId);
       if (ownerFilter !== 'All') params.append('ownerId', ownerFilter);
+      if (followUpOnly) params.append('followUp', 'true');
 
       const res = await apiFetch(`/api/staff/tickets?${params.toString()}`, { signal });
       if (!res.ok) {
@@ -125,7 +130,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
       const data = await res.json();
       return { tickets: data.data || [], pagination: data.pagination || DEFAULT_PAGINATION };
     },
-    [page, sort, order, debouncedSearch, status, itPriority, categoryId, ownerFilter]
+    [page, sort, order, debouncedSearch, status, itPriority, categoryId, ownerFilter, followUpOnly]
   );
 
   const {
@@ -153,6 +158,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
     setItPriority('All');
     setCategoryId('All');
     setOwnerFilter('All');
+    setFollowUpOnly(false);
     setPage(1);
   };
 
@@ -227,6 +233,7 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                 }}
               >
                 <option value="All">All</option>
+                <option value="ACTIVE">Active (not resolved, closed or cancelled)</option>
                 {STATUS_OPTIONS.map((s) => (
                   <option key={s} value={s}>
                     {s.replace(/_/g, ' ')}
@@ -297,6 +304,23 @@ export const StaffTicketQueue: React.FC<{ onOpenTicket?: (id: number) => void }>
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="col-12">
+              <div className="form-check">
+                <input
+                  id="queue-followup"
+                  type="checkbox"
+                  className="form-check-input"
+                  checked={followUpOnly}
+                  onChange={(e) => {
+                    setFollowUpOnly(e.target.checked);
+                    setPage(1);
+                  }}
+                />
+                <label htmlFor="queue-followup" className="form-check-label small fw-semibold text-muted">
+                  Only tickets with a pending follow-up
+                </label>
+              </div>
             </div>
           </div>
           {hasActiveFilters && (

@@ -205,3 +205,9 @@ body {
 .zen-badge-action-completed { background-color: var(--color-action-completed-bg); color: var(--color-action-completed-text); }
 .zen-badge-action-cancelled { background-color: var(--color-action-cancelled-bg); color: var(--color-action-cancelled-text); }
 .zen-chip-followup { background-color: var(--color-followup-bg); color: var(--color-followup-text); }
+
+/* Lab 4 dashboards (ui-spec §3): attention text, metric card focus/hover. Text carries the meaning; colour only emphasises it. */
+.zen-attention-text { color: var(--color-followup-text); }
+.metric-card { border-color: var(--zen-border) !important; color: inherit; }
+.metric-card:hover { border-color: var(--zen-primary) !important; }
+.metric-card:focus-visible { outline: 3px solid var(--zen-focus-ring); outline-offset: 2px; border-color: var(--zen-primary) !important; }

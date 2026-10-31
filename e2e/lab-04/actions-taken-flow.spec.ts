@@ -91,7 +91,7 @@ test.describe("Actions Taken flow", () => {
     const requesterContext = await browser.newContext();
     const requesterPage = await requesterContext.newPage();
     await login(requesterPage, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
-    await requesterPage.goto("/");
+    await requesterPage.goto("/tickets");
     await requesterPage.locator("#ticket-search").fill(ticket.ticketNumber);
     await requesterPage.getByRole("button", { name: new RegExp(ticket.ticketNumber) }).click();
     const requesterActions = requesterPage.getByTestId("actions-taken");

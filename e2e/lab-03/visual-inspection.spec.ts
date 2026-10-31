@@ -248,7 +248,7 @@ test.describe("Visual inspection checklist — status badge palette", () => {
 });
 
 test.describe("Visual inspection checklist — role-specific shell and landing routes", () => {
-  test("Requester sees only requester destinations and lands on My Tickets", async ({ page }) => {
+  test("Requester sees only requester destinations and lands on the Dashboard (Lab 4 D-17)", async ({ page }) => {
     await login(page, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
     await page.goto("/");
 
@@ -265,10 +265,13 @@ test.describe("Visual inspection checklist — role-specific shell and landing r
     await expect(page.getByTestId("authenticated-user").getByTestId("role-badge")).toHaveText("Requester");
   });
 
-  test("IT Staff lands on the queue and does not see User Management", async ({ page }) => {
+  test("IT Staff lands on the Dashboard (Lab 4 D-17), reaches the queue and does not see User Management", async ({ page }) => {
     await login(page, REGRESSION_STAFF_EMAIL, REGRESSION_STAFF_PASSWORD);
     await page.goto("/");
 
+    // Lab 4 (D-17): every role lands on its Dashboard; the queue is one click away.
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await page.getByRole("link", { name: /ticket queue/i }).first().click();
     await expect(page).toHaveURL(/\/staff\/queue$/);
     const staffRole = page.getByTestId("authenticated-user").getByTestId("role-badge");
     await expect(staffRole).toHaveText("IT Staff");
@@ -282,22 +285,22 @@ test.describe("Visual inspection checklist — role-specific shell and landing r
     await expect(page.getByTestId("authenticated-user").getByTestId("role-badge")).toHaveText("IT Staff");
   });
 
-  test("Administrator lands on the queue and sees both explicitly authorized destinations", async ({ page }) => {
+  test("Administrator lands on the Dashboard (Lab 4 D-17) and sees both explicitly authorized destinations", async ({ page }) => {
     await login(page, REGRESSION_ADMIN_EMAIL, REGRESSION_ADMIN_PASSWORD);
     await page.goto("/");
 
-    await expect(page).toHaveURL(/\/staff\/queue$/);
+    await expect(page).toHaveURL(/\/dashboard$/);
     const navbarRole = page.getByTestId("authenticated-user").getByTestId("role-badge");
     await expect(navbarRole).toHaveText("Administrator");
     await expect(navbarRole).toHaveCSS("background-color", "rgb(124, 45, 146)");
-    await expect(page.getByRole("link", { name: /ticket queue/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /ticket queue/i }).first()).toBeVisible();
     await expect(page.getByRole("link", { name: /user management/i })).toBeVisible();
 
     await page.getByRole("link", { name: /user management/i }).click();
     await expect(page.getByRole("heading", { name: /administrator user management/i })).toBeVisible();
     await expect(navbarRole).toHaveText("Administrator");
 
-    await page.getByRole("link", { name: /ticket queue/i }).click();
+    await page.getByRole("link", { name: /ticket queue/i }).first().click();
     await page.getByRole("button", { name: /open/i }).first().click();
     await expect(page).toHaveURL(/\/staff\/tickets\/\d+$/);
     await expect(navbarRole).toHaveText("Administrator");
@@ -322,9 +325,10 @@ test("Forced password change controls show visible focus", async ({ page }) => {
 });
 
 test("Requester list, ticket creation, and ticket details expose visible focus on every Tab stop", async ({ page }) => {
+  test.setTimeout(90_000); // Lab 4 added the Dashboard link, Actions Taken and history to these pages, so there are more Tab stops to audit.
   const fixture = await createFreshTicketAsRequester();
   await login(page, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
-  await page.goto("/");
+  await page.goto("/tickets"); // Lab 4: My Tickets has its own URL; "/" now lands on the Dashboard
   await expect(page.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
   await auditEveryVisibleTabStop(page, "Requester My Tickets");
   await page.setViewportSize({ width: 375, height: 812 });
@@ -364,7 +368,7 @@ test("Attachment removal dialog contains focus, labels itself, and returns focus
   const cleanupContext = await apiLogin(REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
   try {
     await login(page, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
-    await page.goto("/");
+    await page.goto("/tickets");
     await page.locator("#ticket-search").fill(fixture.ticketNumber);
     const ticketRow = page.getByRole("button", { name: new RegExp(fixture.ticketNumber) });
     await expect(ticketRow).toBeVisible();
@@ -419,6 +423,7 @@ test("all Lab 3 screens avoid page-level horizontal overflow at 375px", async ({
 
   const requesterPage = await browser.newPage({ viewport: { width: 375, height: 812 } });
   await login(requesterPage, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
+  await requesterPage.goto("/tickets"); // Lab 4: "/" now lands on the Dashboard
   await expect(requesterPage.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
   await expectNoPageHorizontalOverflow(requesterPage, "Requester My Tickets");
   await requesterPage.getByRole("button", { name: /create ticket/i }).click();
@@ -432,6 +437,7 @@ test("all Lab 3 screens avoid page-level horizontal overflow at 375px", async ({
 
   const staffPage = await browser.newPage({ viewport: { width: 375, height: 812 } });
   await login(staffPage, REGRESSION_STAFF_EMAIL, REGRESSION_STAFF_PASSWORD);
+  await staffPage.goto("/staff/queue"); // Lab 4 D-17: login lands on the Dashboard
   await expect(staffPage.getByRole("heading", { name: /it staff ticket queue/i })).toBeVisible();
   await expectNoPageHorizontalOverflow(staffPage, "Staff Queue");
   await staffPage.getByTestId("ticket-card").first().click();
@@ -441,6 +447,7 @@ test("all Lab 3 screens avoid page-level horizontal overflow at 375px", async ({
 
   const adminPage = await browser.newPage({ viewport: { width: 375, height: 812 } });
   await login(adminPage, REGRESSION_ADMIN_EMAIL, REGRESSION_ADMIN_PASSWORD);
+  await adminPage.goto("/staff/queue"); // Lab 4 D-17: login lands on the Dashboard
   await expect(adminPage.getByRole("heading", { name: /it staff ticket queue/i })).toBeVisible();
   await expectNoPageHorizontalOverflow(adminPage, "Administrator Queue");
   await adminPage.getByRole("link", { name: /user management/i }).click();
@@ -685,8 +692,9 @@ test.describe("Visual inspection checklist — forbidden states never render bla
   test("IT Staff hitting the Administrator-only route is redirected, not shown a blank page", async ({ page }) => {
     await login(page, REGRESSION_STAFF_EMAIL, REGRESSION_STAFF_PASSWORD);
     await page.goto("/admin/users");
-    await expect(page).toHaveURL(/\/staff\/queue$/);
-    await expect(page.getByRole("heading", { name: /it staff ticket queue/i })).toBeVisible();
+    // Lab 4 D-17: a forbidden route falls back to the role home, which is the Dashboard.
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByRole("heading", { name: /welcome back/i })).toBeVisible();
     await expect(page.getByRole("link", { name: /user management/i })).toHaveCount(0);
   });
 

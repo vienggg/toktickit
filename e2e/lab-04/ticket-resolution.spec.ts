@@ -82,7 +82,7 @@ test.describe("Ticket resolution and lifecycle", () => {
     const requesterContext = await browser.newContext();
     const requester = await requesterContext.newPage();
     await login(requester, REGRESSION_REQUESTER_EMAIL, REGRESSION_REQUESTER_PASSWORD);
-    await requester.goto("/");
+    await requester.goto("/tickets");
     await requester.locator("#ticket-search").fill(ticket.ticketNumber);
     await requester.getByRole("button", { name: new RegExp(ticket.ticketNumber) }).click();
     await requester.getByRole("button", { name: /problem appears resolved/i }).click();

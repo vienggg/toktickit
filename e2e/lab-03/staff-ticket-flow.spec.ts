@@ -18,7 +18,7 @@ test.describe("E2E-03: full staff ticket workflow", () => {
 
   test("queue -> open -> claim -> IT priority -> status -> comment -> note", async ({ page }) => {
     await login(page, REGRESSION_STAFF_EMAIL, REGRESSION_STAFF_PASSWORD);
-    await expect(page).toHaveURL(/\/staff\/queue|\/$/);
+    await expect(page).toHaveURL(/\/dashboard|\/staff\/queue|\/$/); // Lab 4 D-17: lands on the Dashboard
     await page.goto("/staff/queue");
     await expect(page.getByRole("heading", { name: /it staff ticket queue/i })).toBeVisible();
 

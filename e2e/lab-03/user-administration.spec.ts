@@ -79,7 +79,7 @@ test.describe("E2E-04: full admin user-management workflow", () => {
     await userPage.getByLabel(/^new password$/i).fill(newPassword);
     await userPage.getByLabel(/confirm new password/i).fill(newPassword);
     await userPage.getByRole("button", { name: /save new password/i }).click();
-    await expect(userPage.getByRole("heading", { name: /my support tickets/i })).toBeVisible();
+    await expect(userPage.getByRole("heading", { name: /welcome back/i })).toBeVisible(); // Lab 4 D-17: lands on the Dashboard
 
     await userContext.close();
   });
