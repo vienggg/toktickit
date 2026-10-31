@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiFetch, parseApiError } from '../api';
+import { apiFetch, parseApiError, parseApiErrorDetail } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { useStaffMembers, useSavingAction, formatDate } from '../hooks/usePaginatedFetch';
 import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
+import { ActionsTaken } from './ActionsTaken';
+import { StatusHistory } from './StatusHistory';
 import { Navbar } from './Navbar';
 import { TicketStatusBadge } from './TicketStatusBadge';
 import type { TicketStatusCode } from './TicketStatusBadge';
@@ -40,6 +42,9 @@ interface StaffTicketDetailData {
   // "server computes, client reads" pattern PR #66 established for
   // canSignalResolution on the Requester's TicketDetail screen.
   permittedStatusTransitions: Status[];
+  // Lab 4 (api-spec §2). Optional so older mocks and responses still render.
+  version?: number;
+  resolutionBlockers?: Array<'NO_OWNER' | 'NO_COMPLETED_ACTION' | 'OPEN_ACTIONS'>;
   ownerId: number | null;
   owner: { id: number; name: string } | null;
   requesterId: number;
@@ -65,6 +70,16 @@ interface CommentOrNote {
 // (review of PR #68, item 5).
 
 const PRIORITY_OPTIONS: Priority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
+
+// BR-20 / BR-21: these changes need a reason typed by the user.
+const REASON_REQUIRED_STATUSES = ['CANCELLED', 'REOPENED'];
+// Statuses from which RESOLVED is otherwise a legal destination (spec §6.2).
+const CAN_RESOLVE_FROM = ['OPEN', 'IN_PROGRESS', 'WAITING_FOR_REQUESTER', 'REOPENED'];
+const BLOCKER_TEXT: Record<string, string> = {
+  NO_OWNER: 'The ticket needs an owner.',
+  NO_COMPLETED_ACTION: 'At least one action must be completed.',
+  OPEN_ACTIONS: 'Finish or cancel the planned and in-progress actions.',
+};
 
 function PriorityBadge({ priority }: { priority: string }) {
   const variant =
@@ -110,6 +125,10 @@ export const StaffTicketDetail: React.FC = () => {
   // Status control state
   const [statusSelection, setStatusSelection] = useState<string>('');
   const statusAction = useSavingAction();
+  // Lab 4: reason for Cancel/Reopen, conflict banner (BR-25) and history refresh.
+  const [statusReason, setStatusReason] = useState('');
+  const [conflict, setConflict] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
 
   // Public Comments state
   const [comments, setComments] = useState<PublicCommentData[]>([]);
@@ -177,17 +196,26 @@ export const StaffTicketDetail: React.FC = () => {
     await submitOwner(String(user.id));
   };
 
+  // Lab 4 (BR-25): send the version the user is looking at; a 409 STALE_UPDATE
+  // shows the conflict banner instead of silently overwriting someone else's change.
+  const withVersion = (body: Record<string, unknown>) => (ticket?.version !== undefined ? { ...body, expectedVersion: ticket.version } : body);
+  const failWith = async (res: Response, fallback: string): Promise<never> => {
+    const detail = await parseApiErrorDetail(res, fallback);
+    if (detail.code === 'STALE_UPDATE') setConflict(true);
+    throw new Error(detail.message);
+  };
+
   const submitOwner = async (ownerIdValue: string) => {
     await ownerAction.run(
       async () => {
-        const payload = { ownerId: ownerIdValue === '' ? null : parseInt(ownerIdValue, 10) };
+        const payload = withVersion({ ownerId: ownerIdValue === '' ? null : parseInt(ownerIdValue, 10) });
         const res = await apiFetch(`/api/staff/tickets/${ticketId}/owner`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
         if (!res.ok) {
-          throw new Error(await parseApiError(res, 'Failed to update ticket owner.'));
+          return failWith(res, 'Failed to update ticket owner.');
         }
         const updated: StaffTicketDetailData = await res.json();
         setTicket(updated);
@@ -209,10 +237,10 @@ export const StaffTicketDetail: React.FC = () => {
         const res = await apiFetch(`/api/staff/tickets/${ticketId}/it-priority`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ itPriority: itPrioritySelection }),
+          body: JSON.stringify(withVersion({ itPriority: itPrioritySelection })),
         });
         if (!res.ok) {
-          throw new Error(await parseApiError(res, 'Failed to update IT priority.'));
+          return failWith(res, 'Failed to update IT priority.');
         }
         const updated: StaffTicketDetailData = await res.json();
         setTicket(updated);
@@ -229,14 +257,22 @@ export const StaffTicketDetail: React.FC = () => {
         const res = await apiFetch(`/api/staff/tickets/${ticketId}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: statusSelection }),
+          body: JSON.stringify(
+            withVersion({
+              status: statusSelection,
+              ...(REASON_REQUIRED_STATUSES.includes(statusSelection) ? { reason: statusReason.trim() } : {}),
+            })
+          ),
         });
         if (!res.ok) {
-          throw new Error(await parseApiError(res, 'Failed to update ticket status.'));
+          return failWith(res, 'Failed to update ticket status.');
         }
         const updated: StaffTicketDetailData = await res.json();
         setTicket(updated);
         setStatusSelection('');
+        setStatusReason('');
+        setConflict(false);
+        setHistoryKey((k) => k + 1);
       },
       'Status updated.',
       'Failed to update ticket status.'
@@ -274,6 +310,9 @@ export const StaffTicketDetail: React.FC = () => {
       setIsPostingNote(false);
     }
   };
+
+  const needsReason = REASON_REQUIRED_STATUSES.includes(statusSelection);
+  const resolveBlockers = ticket?.resolutionBlockers ?? [];
 
   if (isLoading) {
     return (
@@ -468,6 +507,39 @@ export const StaffTicketDetail: React.FC = () => {
               matrix. */}
           <div className="mt-4 pt-4 border-top">
             <h6 className="fw-bold text-dark mb-3">🔄 Status</h6>
+            {conflict && (
+              <div className="alert alert-warning small py-2 mb-3 d-flex flex-wrap align-items-center gap-2" role="alert" data-testid="conflict-banner">
+                <span>
+                  <strong>This ticket was changed by someone else.</strong> Reload the latest version before trying again.
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-zen-outline"
+                  onClick={async () => {
+                    setConflict(false);
+                    statusAction.setError(null);
+                    try {
+                      await fetchTicket();
+                    } catch {
+                      setConflict(true);
+                    }
+                  }}
+                >
+                  Reload latest
+                </button>
+              </div>
+            )}
+            {resolveBlockers.length > 0 && CAN_RESOLVE_FROM.includes(ticket.status) && (
+              <div className="alert alert-secondary small py-2 mb-3" data-testid="resolve-blocked">
+                <strong>Resolve is not available yet.</strong>
+                <ul className="mb-1 mt-1">
+                  {resolveBlockers.map((b) => (
+                    <li key={b}>{BLOCKER_TEXT[b] ?? b}</li>
+                  ))}
+                </ul>
+                <a href="#actions">Go to Actions Taken</a>
+              </div>
+            )}
             {statusAction.error && <div className="alert alert-danger small py-2 mb-3">{statusAction.error}</div>}
             {statusAction.success && <div className="alert alert-success small py-2 mb-3">{statusAction.success}</div>}
 
@@ -476,6 +548,7 @@ export const StaffTicketDetail: React.FC = () => {
                 This ticket is <strong>{ticket.status.replace(/_/g, ' ')}</strong>, a terminal status with no further transitions.
               </p>
             ) : (
+              <>
               <div className="d-flex flex-wrap gap-2 align-items-end">
                 <div>
                   <label htmlFor="status-select" className="form-label small fw-semibold text-dark d-block">
@@ -500,7 +573,7 @@ export const StaffTicketDetail: React.FC = () => {
                   type="button"
                   className="btn btn-zen-primary btn-sm"
                   onClick={handleApplyStatus}
-                  disabled={statusAction.isSaving || !statusSelection}
+                  disabled={statusAction.isSaving || !statusSelection || (needsReason && !statusReason.trim())}
                 >
                   {statusAction.isSaving ? (
                     <>
@@ -511,8 +584,42 @@ export const StaffTicketDetail: React.FC = () => {
                   )}
                 </button>
               </div>
+              {needsReason && (
+                <div className="mt-3">
+                  <label htmlFor="status-reason" className="form-label small fw-semibold text-dark">
+                    Reason (required)
+                  </label>
+                  <textarea
+                    id="status-reason"
+                    className="form-control"
+                    rows={2}
+                    maxLength={500}
+                    required
+                    value={statusReason}
+                    onChange={(e) => setStatusReason(e.target.value)}
+                    disabled={statusAction.isSaving}
+                  />
+                  <div className="form-text">{statusReason.trim().length}/500 — staff only, not shown to the requester.</div>
+                </div>
+              )}
+              </>
             )}
           </div>
+
+          {/* Lab 4: Actions Taken and the append-only status history. onChanged
+              refreshes the summary so blockers and the permitted list stay current. */}
+          <ActionsTaken
+            ticketId={ticketId}
+            ticketStatus={ticket.status}
+            mode="staff"
+            currentUserId={user?.id}
+            currentUserName={user?.name}
+            staffMembers={staffMembers}
+            onChanged={() => {
+              fetchTicket().catch(() => undefined);
+            }}
+          />
+          <StatusHistory ticketId={ticketId} showReasons refreshKey={historyKey} />
 
           {/* Attachments panel — unchanged from Lab 2, read-only here (no
               upload/remove controls on the staff screen). */}
