@@ -22,7 +22,6 @@
 - Migration 5 had one of six foreign keys. The AI trusted its own `sed` extract; the reviewer caught it, not the AI.
 - The AI started work (assignees, acceptance criteria, linking a PR) before I said to continue, and I told it to stop and wait.
 - The Pending Follow-ups card linked to a list that included closed tickets; a drill-down parity test caught this.
-- The AI's own count (33 of 33 Playwright tests) was wrong until I asked it to rerun; the final run is 42 of 42.
 
 ## My Reflection
 > **Draft by the AI. Replace this with your own words before you submit.**
