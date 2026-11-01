@@ -350,6 +350,25 @@ describe('Actions Taken panel (UI-06..UI-10)', () => {
     expect(within(locked).queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
   });
 
+  it('UI-09c: while Start is in flight every row action is disabled, and Start sends exactly one PATCH', async () => {
+    items = [makeAction({ id: 1 })];
+    let release: (r: Response) => void = () => undefined;
+    nextPatch = () => new Promise<Response>((resolve) => { release = resolve; });
+    renderPanel();
+    fireEvent.click(within(await screen.findByTestId('actions-table')).getByRole('button', { name: /view action 1/i }));
+    const details = await screen.findByRole('region', { name: /action details/i });
+    const start = within(details).getByRole('button', { name: /^start$/i });
+    fireEvent.click(start);
+    fireEvent.click(start);
+    await waitFor(() => expect(start).toBeDisabled());
+    for (const name of [/^edit$/i, /^complete$/i, /^cancel action$/i]) {
+      expect(within(details).getByRole('button', { name })).toBeDisabled();
+    }
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+    release(await json(200, makeAction({ id: 1, status: 'IN_PROGRESS', version: 2 })));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
   it('UI-08d: a stale edit (409) shows the conflict banner, keeps the typed text and lets the user retry on the latest version', async () => {
     items = [makeAction({ id: 3, description: 'Mine', version: 1 })];
     renderPanel();
