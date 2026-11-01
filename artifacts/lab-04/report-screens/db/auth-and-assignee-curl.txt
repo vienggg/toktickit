@@ -1,0 +1,29 @@
+# Inactive assignee (user 19, isActive=false, role IT_STAFF) is rejected
+POST /api/staff/tickets/1233/actions {"actionAt":"2026-11-01T09:08:52.608Z","description":"Authorization check","status":"PLANNED","assigneeId":19}
+-> 422 {"error":{"code":"INVALID_ASSIGNEE","message":"The assignee must be an active IT Staff or Administrator user."}}
+
+# Requester-role assignee is rejected
+POST /api/staff/tickets/1233/actions {"actionAt":"2026-11-01T09:08:52.608Z","description":"Authorization check","status":"PLANNED","assigneeId":599}
+-> 422 {"error":{"code":"INVALID_ASSIGNEE","message":"The assignee must be an active IT Staff or Administrator user."}}
+
+# Unknown assignee id is rejected
+POST /api/staff/tickets/1233/actions {"actionAt":"2026-11-01T09:08:52.608Z","description":"Authorization check","status":"PLANNED","assigneeId":99999999}
+-> 422 {"error":{"code":"INVALID_ASSIGNEE","message":"The assignee must be an active IT Staff or Administrator user."}}
+
+# Requester tries to create an action
+POST /api/staff/tickets/1233/actions {"actionAt":"2026-11-01T09:08:52.608Z","description":"Authorization check","status":"PLANNED","assigneeId":599}
+-> 403 {"error":{"code":"FORBIDDEN","message":"You do not have permission to perform this action."}}
+
+# Requester reads staff dashboard
+GET /api/dashboard/staff
+-> 403 {"error":{"code":"FORBIDDEN","message":"You do not have permission to perform this action."}}
+
+# Requester reads own ticket 1233 actions (read-only list, allowed)
+GET /api/tickets/1233/actions
+-> 200 {"items":[{"id":121,"ticketId":1233,"actionAt":"2026-10-31T18:13:00.139Z","description":"Fixture action","result":null,"status":"PLANNED","followUpRequired":false,"followUpNote":null,"attachmentNotes":null,"createdBy":{"id":203,"name":"Regression Suite Staff"}
+
+# rows written by the rejected requests: 0
+
+# Requester reads the actions of a ticket owned by someone else (masked, BR-04)
+GET /api/tickets/30/actions
+-> 404 {"error":{"code":"NOT_FOUND","message":"Ticket not found."}}

@@ -1,0 +1,17 @@
+Staff dashboard (GET /api/dashboard/staff, as regression staff) vs direct Prisma counts
+2026-11-01T09:07:36.750Z
+
+metric                      dashboard   database    match
+unassigned                  2612        2612        YES
+myOwnedTickets              3034        3034        YES
+myOpenActions               1017        1017        YES
+pendingFollowUps            166         166         YES
+waitingForRequester         451         451         YES
+byStatus.NEW                2234        2234        YES
+byStatus.OPEN               1810        1810        YES
+byStatus.IN_PROGRESS        1027        1027        YES
+byStatus.WAITING_FOR_REQUESTER451         451         YES
+byStatus.RESOLVED           881         881         YES
+byStatus.CLOSED             713         713         YES
+byStatus.REOPENED           386         386         YES
+byStatus.CANCELLED          677         677         YES
