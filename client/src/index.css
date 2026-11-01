@@ -211,3 +211,19 @@ body {
 .metric-card { border-color: var(--zen-border) !important; color: inherit; }
 .metric-card:hover { border-color: var(--zen-primary) !important; }
 .metric-card:focus-visible { outline: 3px solid var(--zen-focus-ring); outline-offset: 2px; border-color: var(--zen-primary) !important; }
+
+/* Lab 4 hardening (ui-spec V-13): touch targets are at least 44 px on phones. */
+@media (max-width: 575.98px) {
+  .btn,
+  .form-select,
+  .form-control:not(textarea),
+  .navbar .nav-link { min-height: 44px; min-width: 44px; }
+  .form-check { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding-left: 0; }
+  .form-check .form-check-input { float: none; margin: 0; width: 1.5rem; height: 1.5rem; }
+  .form-check .form-check-label { flex: 1; display: flex; align-items: center; min-height: 44px; }
+}
+
+/* Lab 4 hardening (ui-spec V-14): no motion for people who ask for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
