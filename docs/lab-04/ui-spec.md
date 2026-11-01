@@ -143,3 +143,27 @@ Status is never conveyed by colour alone: each badge carries its text label and 
 | V-17 | Role navigation shows only permitted links; active page marked | shell |
 
 Results are recorded per screen and viewport in `artifacts/lab-04/screenshots/` and summarised in the final report.
+
+### 9.1 Results (I-7)
+
+Run on `lab4-staging` plus the I-7 changes. Screens: Requester dashboard, Requester ticket detail, Staff dashboard, Administrator dashboard, Staff ticket detail (Actions Taken: empty, validation error, list, action details). Each at 1280, 768 and 375 px. Screenshots are in `artifacts/lab-04/screenshots/{requester-dashboard,staff-dashboard,actions-taken}/` and the measurements in `artifacts/lab-04/screenshots/inspection-results.json`. The automated checks live in `e2e/lab-04/visual-inspection.spec.ts`.
+
+| # | Result | Evidence |
+|---|---|---|
+| V-01 | Pass | No horizontal scroll on all 24 screen/viewport captures (asserted in the spec). |
+| V-02 | Pass | Long action descriptions and long fixture summaries wrap in the screenshots; no clipping seen. 4-digit counts (2,545 / 2,939) fit the metric cards at 375 px. |
+| V-03 | Pass | Metric cards reflow to two columns at 375 px (screenshot `Figure-staff-dashboard@mobile`). |
+| V-04 | Pass | Actions Taken is a table at 1280 and stacked cards at 375 px with all fields (`Figure-actions-list@*`). |
+| V-05 | Pass | Tab audit visits every control on the dashboard and staff ticket detail; none is skipped. |
+| V-06 | Pass | The same audit finds a visible focus ring on every focused control. |
+| V-07 | Pass | The audit finds an accessible name for every focused control; field errors are covered by UI-07b. |
+| V-08 | Pass | Status, priority and follow-up show text plus a symbol; checked in screenshots. |
+| V-09 | Pass | Read-only details and the edit form are separate views (`Figure-action-details@*`). |
+| V-10 | Pass | Inline error under its field, first invalid field focused (`Figure-action-validation-error@*`, UI-07b). |
+| V-11 | Pass (visual) | Zen Green tokens only; no placeholder UI found in the audit (PR #90). |
+| V-12 | Not measured | Contrast was not measured with a tool in Lab 4; the colour tokens are unchanged from Lab 3. |
+| V-13 | Fixed, then pass | First run found controls under 44 px on mobile. `index.css` now sets a 44 px minimum for buttons, selects, inputs and checkbox rows below 576 px; the spec asserts zero small controls at 375 px. |
+| V-14 | Fixed, then pass | The app had no reduced-motion handling. `index.css` now removes animations and transitions under `prefers-reduced-motion: reduce`; the tab audit runs with that setting. |
+| V-15 | Pass | Zero console errors on every capture, apart from the signed-out `GET /api/auth/me` 401 that Lab 3 requires. |
+| V-16 | Pass | Covered by E2E-06 and DASH-07. |
+| V-17 | Pass | Covered by UI-15 and E2E-08. |

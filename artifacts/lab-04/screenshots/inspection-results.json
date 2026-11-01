@@ -1,0 +1,223 @@
+[
+  {
+    "folder": "requester-dashboard",
+    "figure": "Figure-requester-dashboard",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 5,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "requester-dashboard",
+    "figure": "Figure-requester-dashboard",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 5,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "requester-dashboard",
+    "figure": "Figure-requester-dashboard",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "requester-dashboard",
+    "figure": "Figure-requester-ticket-detail",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 8,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "requester-dashboard",
+    "figure": "Figure-requester-ticket-detail",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 8,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "requester-dashboard",
+    "figure": "Figure-requester-ticket-detail",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-actions-empty",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 12,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-actions-empty",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 12,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-actions-empty",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-action-validation-error",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 17,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-action-validation-error",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 17,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-action-validation-error",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-actions-list",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 14,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-actions-list",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 14,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-actions-list",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-action-details",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 19,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-action-details",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 19,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "actions-taken",
+    "figure": "Figure-action-details",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "staff-dashboard",
+    "figure": "Figure-staff-dashboard",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 18,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "staff-dashboard",
+    "figure": "Figure-staff-dashboard",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 18,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "staff-dashboard",
+    "figure": "Figure-staff-dashboard",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "staff-dashboard",
+    "figure": "Figure-admin-dashboard",
+    "viewport": "desktop",
+    "width": 1280,
+    "overflow": false,
+    "smallTargets": 19,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "staff-dashboard",
+    "figure": "Figure-admin-dashboard",
+    "viewport": "tablet",
+    "width": 768,
+    "overflow": false,
+    "smallTargets": 19,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "staff-dashboard",
+    "figure": "Figure-admin-dashboard",
+    "viewport": "mobile",
+    "width": 375,
+    "overflow": false,
+    "smallTargets": 0,
+    "consoleErrors": 0
+  },
+  {
+    "folder": "keyboard",
+    "figure": "tab-audit",
+    "problems": []
+  }
+]
