@@ -1,0 +1,52 @@
+
+ RUN  v2.1.9 C:/Users/User/OneDrive/Desktop/softwareengineer/toktickit/server
+
+ ✓ tests/lab-03/status-transitions.unit.test.ts (77 tests) 23ms
+ ✓ tests/lab-04/action-rules.unit.test.ts (22 tests) 14ms
+ ✓ tests/lab-03/migration-regression.api.test.ts (5 tests) 283ms
+ ✓ tests/lab-02/my-tickets.api.test.ts (5 tests) 452ms
+ ✓ tests/lab-04/actions-taken-constraints.api.test.ts (4 tests) 180ms
+ ✓ tests/lab-02/ticket-number.unit.test.ts (3 tests) 6ms
+ ✓ tests/lab-02/create-ticket.api.test.ts (5 tests) 726ms
+ ✓ tests/lab-02/ticket-detail.api.test.ts (12 tests) 1296ms
+ ✓ tests/lab-03/comments-notes.api.test.ts (23 tests) 2156ms
+ ✓ tests/lab-03/staff-queue.api.test.ts (21 tests) 2388ms
+ ✓ tests/lab-03/auth.api.test.ts (14 tests) 2500ms
+   ✓ Authentication (AC-01, AC-02, AC-05, AC-06, AC-07) > API-09: change-password rejects the current password re-typed as the new one (BR-10) 342ms
+   ✓ Authentication (AC-01, AC-02, AC-05, AC-06, AC-07) > API-12: a successful change clears mustChangePassword and the new password logs in afterward (AC-02, BR-02) 755ms
+ ✓ tests/lab-03/authorization.api.test.ts (16 tests) 2505ms
+   ✓ Authorization — deactivation takes effect immediately, not at token expiry > API-24: a valid, unexpired session is rejected with 403 the moment the account is deactivated 476ms
+ ✓ tests/lab-03/password.unit.test.ts (8 tests) 993ms
+   ✓ Password utility (UNIT-01, UNIT-02) > UNIT-01b: verifyPassword succeeds only for the correct plaintext (BR-12) 369ms
+   ✓ Password utility (UNIT-01, UNIT-02) > UNIT-01c: two hashes of the same password are not identical (salted) 499ms
+ ✓ tests/lab-03/staff-ticket-detail.api.test.ts (24 tests) 2675ms
+ ✓ tests/lab-01/health.test.ts (1 test) 31ms
+ ✓ tests/lab-04/migration-regression.api.test.ts (9 tests) 4139ms
+   ✓ Lab 4 migration and regression (MIG-01..MIG-06) > MIG-04: running the seed again adds no rows (idempotent) 2179ms
+   ✓ Lab 4 migration integrity (MIG-07, MIG-08) > MIG-08: the live database has no drift from schema.prisma 1513ms
+ ✓ tests/lab-01/systems.test.ts (2 tests) 513ms
+   ✓ GET /api/systems > returns the seeded active related systems 505ms
+ ✓ tests/lab-01/categories.test.ts (2 tests) 515ms
+   ✓ GET /api/categories > returns the four seeded categories in id order 506ms
+ ✓ tests/lab-04/actions-taken.api.test.ts (23 tests) 3869ms
+ ✓ tests/lab-04/requester-dashboard.api.test.ts (7 tests) 4061ms
+   ✓ Requester dashboard API (DASH-01..DASH-05) > DASH-01: returns only the caller's own Tickets even when another requesterId is supplied (AC-02) 566ms
+   ✓ Requester dashboard API (DASH-01..DASH-05) > DASH-02: every metric equals the corresponding direct database query (AC-22) 366ms
+   ✓ Requester dashboard API (DASH-01..DASH-05) > DASH-04: recently resolved uses the last 7 Bangkok calendar days, newest first, max 5 (AC-26) 303ms
+   ✓ Requester dashboard API (DASH-01..DASH-05) > DASH-05: staff and administrators get 403, anonymous callers get 401 (AC-23, AC-31) 516ms
+ ✓ tests/lab-03/users-admin.api.test.ts (33 tests) 5066ms
+   ✓ Administrator User Management (API-21 – API-27) > POST /api/admin/users/:id/initial-password (API-25) > forces mustChangePassword true, and the old password no longer works while the new one does 346ms
+   ✓ Administrator User Management (API-21 – API-27) > Last-Administrator protection (API-27, BR-28) > concurrent PATCHes that would each deactivate the other of exactly two active Administrators: at most one succeeds, and at least one active Administrator always remains 356ms
+ ✓ tests/lab-04/ticket-workflow.api.test.ts (11 tests) 5236ms
+   ✓ Ticket workflow API (WF-01..WF-11) > WF-07: every cell of the 8x8 transition matrix behaves as documented 1293ms
+ ✓ tests/lab-04/staff-dashboard.api.test.ts (11 tests) 11184ms
+   ✓ Staff dashboard API (DASH-06..DASH-11) > DASH-06a: per-user metrics for a dedicated staff user equal their direct queries 432ms
+   ✓ Staff dashboard API (DASH-06..DASH-11) > DASH-06b: org-wide metrics, status counts and priority counts equal the direct SQL/Prisma queries 7192ms
+   ✓ Staff dashboard API (DASH-06..DASH-11) > DASH-07: every filter-based drill-down link opens a list whose total equals the card 327ms
+   ✓ Staff dashboard API (DASH-06..DASH-11) > PERF-01b: responds in under 500 ms (median of 5 calls) on the seeded database (AC-32) 562ms
+
+ Test Files  23 passed (23)
+      Tests  338 passed (338)
+   Start at  13:30:28
+   Duration  13.22s (transform 1.30s, setup 0ms, collect 19.42s, tests 50.81s, environment 6ms, prepare 5.71s)
+
