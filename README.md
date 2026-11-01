@@ -6,8 +6,15 @@ TokTickIT is a full-stack IT service desk application built with React, Vite, Ex
 - **Frontend**: React 18, TypeScript, Vite, Bootstrap 5
 - **Backend**: Node.js, Express, TypeScript, Prisma ORM
 - **Database**: PostgreSQL 16
-- **Testing**: Vitest, Supertest, React Testing Library
+- **Testing**: Vitest, Supertest, React Testing Library, Playwright
 - **Containerization**: Docker & Docker Compose
+
+## ✨ What it does
+- **Requesters** create tickets, follow them, reply to IT, and see the steps IT has taken (read-only).
+- **IT Staff** work a ticket queue, claim tickets, record **Actions Taken** (who did what, result, follow-up), keep internal notes, and resolve a ticket only when the resolution rules are met.
+- **Administrators** do everything IT Staff do and manage users.
+- Every role lands on a **Dashboard** whose counts open the matching filtered list.
+- Ticket status changes are recorded in an append-only history. Edits use a version check, so two people editing the same record get a conflict message instead of a silent overwrite.
 
 ## 🚀 Quick Start with Docker (Recommended)
 
@@ -68,7 +75,10 @@ initial password **`ChangeMe123!`** and is forced through the mandatory
 Change Password flow at first login. This is not a real secret — never reuse
 it outside local development. The seed script is idempotent: it upserts
 users/categories/systems and skips any ticket whose number already exists, so
-re-running it never deletes real data created through the app.
+re-running it never deletes real data created through the app. The Lab 4 part
+of the seed adds sample Actions Taken and status history to existing tickets
+(identified by a `seed-lab4-` prefix) and two extra IT users, and is safe to
+re-run too.
 
 ---
 
@@ -79,10 +89,14 @@ re-running it never deletes real data created through the app.
   cd client
   npm test
   ```
-- **Server API Tests**:
+- **Server API Tests** (needs the PostgreSQL database from section 3 running):
   ```bash
   cd server
   npm test
+  ```
+- **End-to-end tests** (Playwright starts the client and server itself; run from the repo root):
+  ```bash
+  npx playwright test
   ```
 
 ---
@@ -91,4 +105,6 @@ re-running it never deletes real data created through the app.
 
 - `client/`: React + Vite frontend UI application and Vitest tests
 - `server/`: Express API backend, Prisma schema, seed script, and Supertest integration tests
-- `docs/`: Lab documentation, session state handoffs, peer review logs, and report specifications
+- `e2e/`: Playwright end-to-end tests (`lab-03/`, `lab-04/`)
+- `docs/`: Lab documentation, session state handoffs, peer review logs, and report specifications. Lab 4 lives in `docs/lab-04/` (specification, API spec, UI spec, tests, reviewer log, AI use)
+- `artifacts/`: Migration rehearsal notes and screenshots for each lab

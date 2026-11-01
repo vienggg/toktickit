@@ -750,7 +750,7 @@ export const ActionsTaken: React.FC<ActionsTakenProps> = ({
             <p className="text-muted small mb-2">The ticket is locked, so this action cannot be changed.</p>
           ) : (
             <div className="d-flex flex-wrap gap-2 mb-2">
-              <button type="button" className="btn btn-sm btn-zen-primary" onClick={() => setPanel({ kind: 'edit', id: selected.id })}>
+              <button type="button" className="btn btn-sm btn-zen-primary" disabled={rowBusy} onClick={() => setPanel({ kind: 'edit', id: selected.id })}>
                 Edit
               </button>
               {selected.status === 'PLANNED' && (
@@ -758,7 +758,7 @@ export const ActionsTaken: React.FC<ActionsTakenProps> = ({
                   Start
                 </button>
               )}
-              <button type="button" className="btn btn-sm btn-zen-outline" onClick={() => setPanel({ kind: 'edit', id: selected.id, status: 'COMPLETED' })}>
+              <button type="button" className="btn btn-sm btn-zen-outline" disabled={rowBusy} onClick={() => setPanel({ kind: 'edit', id: selected.id, status: 'COMPLETED' })}>
                 Complete
               </button>
               <button type="button" className="btn btn-sm btn-outline-danger" disabled={rowBusy} onClick={() => patchStatus(selected, 'CANCELLED')}>
