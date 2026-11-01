@@ -21,7 +21,7 @@
 | I-6 Hardening and regression (#80) | [#90](https://github.com/vienggg/toktickit/pull/90) | `feature/lab4-hardening` → `lab4-staging` | Approved | Merged by @projectnewy |
 | I-7 Responsive, accessibility, visual inspection (#81) | [#91](https://github.com/vienggg/toktickit/pull/91) | `feature/lab4-visual-a11y` → `lab4-staging` | Approved | Merged by @projectnewy |
 | I-8 Release (#82) | [#92](https://github.com/vienggg/toktickit/pull/92) | `release/lab4` → `main` | Approved | Merged by @projectnewy; tag `lab4-release` |
-| I-9 Final report (#83) | this PR | `docs/lab4-report-final` → `main` | see the PR | see the PR |
+| I-9 Final report (#83) | [#93](https://github.com/vienggg/toktickit/pull/93) | `docs/lab4-report-final` → `lab4-staging` (the release to `main` follows in a separate PR) | approved, no changes requested; two non-blocking notes (row said "into main", no tsc output file) fixed in the follow-up | merged by @projectnewy 2026-11-01 09:16 UTC; the reviewer read the diff only, did not run tests or open the screenshots |
 
 ## 2. Review Comments Received and Responses
 

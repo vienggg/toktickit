@@ -1,0 +1,2 @@
+server tsc exit 0
+client tsc exit 0
