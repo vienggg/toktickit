@@ -1,0 +1,31 @@
+
+ RUN  v2.1.9 C:/Users/User/OneDrive/Desktop/softwareengineer/toktickit/client
+
+ ✓ tests/lab-03/ProtectedRoute.test.tsx (3 tests) 139ms
+ ✓ tests/lab-03/ChangePassword.test.tsx (3 tests) 323ms
+ ✓ tests/lab-01/App.test.tsx (3 tests) 126ms
+ ✓ tests/lab-03/Login.test.tsx (4 tests) 349ms
+ ✓ tests/lab-02/CreateTicket.test.tsx (2 tests) 420ms
+ ✓ tests/lab-04/RequesterDashboard.test.tsx (6 tests) 499ms
+ ✓ tests/lab-04/Navigation.test.tsx (6 tests) 470ms
+ ✓ tests/lab-02/MyTickets.test.tsx (2 tests) 688ms
+   ✓ My Tickets Screen with Search, Filters, and Pagination (UI-04, UI-05) > UI-05: updates search query and triggers fetch with filter parameters 519ms
+ ✓ tests/lab-04/StaffDashboard.test.tsx (6 tests) 697ms
+   ✓ Staff dashboard (UI-01..UI-03) > UI-01a: renders every metric card, the status and priority strips and all lists from the payload 341ms
+ ✓ tests/lab-02/TicketDetail.test.tsx (5 tests) 736ms
+ ✓ tests/lab-04/TicketWorkflow.test.tsx (8 tests) 816ms
+ ✓ tests/lab-03/StaffTicketDetail.test.tsx (11 tests) 968ms
+ ✓ tests/lab-04/ActionsTaken.test.tsx (20 tests) 1327ms
+ ✓ tests/lab-03/UserManagement.test.tsx (10 tests) 1349ms
+   ✓ Administrator User Management (UI-08, UI-09) > UI-08b: search calls the API with the correct query param 397ms
+ ✓ tests/lab-03/StaffTicketQueue.test.tsx (12 tests) 1499ms
+   ✓ IT Staff Ticket Queue (UI-03, UI-04, UI-05) > UI-03c: renders a no-results state with Clear Filters after searching to nothing 453ms
+   ✓ IT Staff Ticket Queue (UI-03, UI-04, UI-05) > UI-03d: search interaction calls the API with the search query 367ms
+ ✓ tests/lab-03/TicketStatusBadge.test.tsx (14 tests) 41ms
+ ✓ tests/lab-03/usePaginatedFetch.test.tsx (1 test) 54ms
+
+ Test Files  17 passed (17)
+      Tests  116 passed (116)
+   Start at  13:30:55
+   Duration  7.00s (transform 2.01s, setup 6.74s, collect 11.45s, tests 10.50s, environment 37.48s, prepare 4.64s)
+
