@@ -156,7 +156,7 @@ Both endpoints are `GET`, return a fixed concise document (no Ticket collections
     "unassigned":          { "count": 4, "href": "/staff/queue?ownerId=unassigned&status=ACTIVE" },
     "myOwnedTickets":      { "count": 6, "href": "/staff/queue?ownerId=7&status=ACTIVE" },
     "myOpenActions":       { "count": 3, "href": "#my-actions" },
-    "pendingFollowUps":    { "count": 2, "href": "/staff/queue?followUp=true" },
+    "pendingFollowUps":    { "count": 2, "href": "/staff/queue?followUp=true&status=ACTIVE" },
     "waitingForRequester": { "count": 5, "href": "/staff/queue?status=WAITING_FOR_REQUESTER" }
   },
   "byStatus":     [ { "status": "NEW", "count": 14, "href": "/staff/queue?status=NEW" } ],

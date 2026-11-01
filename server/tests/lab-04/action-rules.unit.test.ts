@@ -13,6 +13,7 @@ import {
   hasOpenActions,
 } from "../../src/utils/actionRules.js";
 import { getPermittedTransitionsForTicket, STATUS_TRANSITIONS } from "../../src/utils/statusTransitions.js";
+import { bangkokWindowStart } from "../../src/utils/bangkokTime.js";
 
 // UNIT-01..UNIT-05 (docs/lab-04/tests.md). Pure functions only: no Express, no database.
 
@@ -152,5 +153,23 @@ describe("Permitted transitions with Lab 4 gates (UNIT-04, BR-17..BR-19)", () =>
 
   it("keeps the two-argument Lab 3 behaviour when no blockers are passed", () => {
     expect(getPermittedTransitionsForTicket("OPEN", null)).toEqual(["WAITING_FOR_REQUESTER", "RESOLVED", "CANCELLED"]);
+  });
+});
+
+describe("Bangkok window helper (UNIT-06, BR-30)", () => {
+  // Asia/Bangkok is UTC+7 with no daylight saving time.
+  it("starts at 00:00 Bangkok time six days before the current Bangkok date", () => {
+    // 2026-11-02 17:00 in Bangkok -> window opens 2026-10-27 00:00 Bangkok = 2026-10-26T17:00Z
+    expect(bangkokWindowStart(new Date("2026-11-02T10:00:00.000Z")).toISOString()).toBe("2026-10-26T17:00:00.000Z");
+  });
+
+  it("is unchanged just before Bangkok midnight and moves forward one day at Bangkok midnight", () => {
+    expect(bangkokWindowStart(new Date("2026-11-02T16:59:59.999Z")).toISOString()).toBe("2026-10-26T17:00:00.000Z");
+    expect(bangkokWindowStart(new Date("2026-11-02T17:00:00.000Z")).toISOString()).toBe("2026-10-27T17:00:00.000Z");
+  });
+
+  it("supports a different look-back and crosses month and year boundaries", () => {
+    expect(bangkokWindowStart(new Date("2026-01-03T05:00:00.000Z"), 6).toISOString()).toBe("2025-12-27T17:00:00.000Z");
+    expect(bangkokWindowStart(new Date("2026-11-02T10:00:00.000Z"), 0).toISOString()).toBe("2026-11-01T17:00:00.000Z");
   });
 });

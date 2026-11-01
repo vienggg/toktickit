@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { RequireAuth, RequireRole, RedirectIfAuthenticated } from './components/ProtectedRoute';
 import { Navbar } from './components/Navbar';
@@ -11,50 +11,81 @@ import { TicketDetail } from './components/TicketDetail';
 import { StaffTicketQueue } from './components/StaffTicketQueue';
 import { StaffTicketDetail } from './components/StaffTicketDetail';
 import { UserManagement } from './components/UserManagement';
+import { RequesterDashboard } from './components/RequesterDashboard';
+import { StaffDashboard } from './components/StaffDashboard';
 
-function RequesterWorkspace() {
-  const [activeTab, setActiveTab] = useState<'create' | 'list' | 'detail'>('list');
-  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null);
-
-  const handleSelectTicket = (id: number) => {
-    setSelectedTicketId(id);
-    setActiveTab('detail');
-  };
-
+// Lab 4 (D-16, ui-spec §2): the Requester area is URL-based so dashboard drill-down links
+// (/tickets?status=ACTIVE) can be opened, bookmarked and tested.
+function PageShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-vh-100 d-flex flex-column" style={{ backgroundColor: 'var(--zen-neutral-light)' }}>
-      <Navbar currentView={activeTab} setCurrentView={setActiveTab} />
-
-      <main className="container py-4 flex-grow-1">
-        {activeTab === 'create' && <CreateTicket />}
-
-        {activeTab === 'list' && (
-          <MyTickets
-            onSelectTicket={handleSelectTicket}
-            onNavigateToCreate={() => setActiveTab('create')}
-          />
-        )}
-
-        {activeTab === 'detail' && selectedTicketId && (
-          <TicketDetail
-            ticketId={selectedTicketId}
-            onBack={() => setActiveTab('list')}
-          />
-        )}
-      </main>
-
-      <footer className="py-3 text-center text-muted border-top bg-white small">
-        TokTickIT IT Helpdesk MVP — CPE 334 Software Engineering
-      </footer>
+      <Navbar />
+      <main className="container py-4 flex-grow-1">{children}</main>
+      <footer className="py-3 text-center text-muted border-top bg-white small">TokTickIT IT Helpdesk — CPE 334</footer>
     </div>
   );
+}
+
+// Dashboard drill-down values -> what the My Tickets status filter understands.
+const REQUESTER_STATUS_FILTER: Record<string, string> = {
+  ACTIVE: 'ACTIVE',
+  WAITING_FOR_REQUESTER: 'WAITING_FOR_REQUESTER',
+  RESOLVED: 'Resolved',
+  CLOSED: 'Closed',
+};
+
+function MyTicketsPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const wanted = searchParams.get('status') ?? '';
+  return (
+    <PageShell>
+      <MyTickets
+        key={wanted}
+        initialStatus={REQUESTER_STATUS_FILTER[wanted]}
+        onSelectTicket={(id) => navigate(`/tickets/${id}`)}
+        onNavigateToCreate={() => navigate('/tickets/new')}
+      />
+    </PageShell>
+  );
+}
+
+function CreateTicketPage() {
+  return (
+    <PageShell>
+      <CreateTicket />
+    </PageShell>
+  );
+}
+
+function TicketDetailPage() {
+  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const ticketId = id ? parseInt(id, 10) : NaN;
+  return (
+    <PageShell>
+      {Number.isFinite(ticketId) ? (
+        <TicketDetail ticketId={ticketId} onBack={() => navigate('/tickets')} />
+      ) : (
+        <div className="alert alert-danger" role="alert">
+          That ticket could not be found.
+        </div>
+      )}
+    </PageShell>
+  );
+}
+
+// /dashboard is the landing page for every role (D-17).
+function DashboardPage() {
+  const { user } = useAuth();
+  if (!user) return null;
+  return <PageShell>{user.role === 'REQUESTER' ? <RequesterDashboard /> : <StaffDashboard />}</PageShell>;
 }
 
 function RoleHome() {
   const { user } = useAuth();
   if (!user) return null;
-  if (user.role === 'REQUESTER') return <RequesterWorkspace />;
-  return <Navigate to="/staff/queue" replace />;
+  return <Navigate to="/dashboard" replace />;
 }
 
 export default function App() {
@@ -75,6 +106,44 @@ export default function App() {
             element={
               <RequireAuth>
                 <ChangePassword />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <DashboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tickets"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['REQUESTER']}>
+                  <MyTicketsPage />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tickets/new"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['REQUESTER']}>
+                  <CreateTicketPage />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tickets/:id"
+            element={
+              <RequireAuth>
+                <RequireRole roles={['REQUESTER']}>
+                  <TicketDetailPage />
+                </RequireRole>
               </RequireAuth>
             }
           />

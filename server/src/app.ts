@@ -9,9 +9,10 @@ import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
 import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
-import { getPermittedTransitions, getPermittedTransitionsForTicket, isLegalTransition } from "./utils/statusTransitions.js";
+import { ACTIVE_TICKET_STATUSES, getPermittedTransitions, getPermittedTransitionsForTicket, isLegalTransition } from "./utils/statusTransitions.js";
 import { BLOCKER_MESSAGES, REASON_MAX, getResolutionBlockers, hasOpenActions } from "./utils/actionRules.js";
 import { registerLab4Routes } from "./lab4Routes.js";
+import { registerDashboardRoutes } from "./dashboardRoutes.js";
 import {
   requireAuth,
   requirePasswordChanged,
@@ -365,7 +366,9 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
       requesterId: req.authUser!.id,
     };
 
-    if (status && status !== "All") {
+    if (status === "ACTIVE") {
+      where.status = { in: [...ACTIVE_TICKET_STATUSES] };
+    } else if (status && status !== "All") {
       const normalized = normalizeStatus(String(status));
       if (normalized) where.status = normalized;
     }
@@ -1159,15 +1162,23 @@ app.get(
   requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
   async (req: Request, res: Response) => {
     try {
-      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize } = req.query;
+      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize, followUp } = req.query;
 
       const where: Prisma.TicketWhereInput = {};
 
-      if (status !== undefined && status !== "All") {
+      if (status === "ACTIVE") {
+        where.status = { in: [...ACTIVE_TICKET_STATUSES] };
+      } else if (status !== undefined && status !== "All") {
         if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
-          return res.status(400).json(validationError("status", "must be a valid TicketStatus or 'All'."));
+          return res.status(400).json(validationError("status", "must be a valid TicketStatus, 'ACTIVE' or 'All'."));
         }
         where.status = status as TicketStatus;
+      }
+
+      // Lab 4 (BR-34): Tickets with at least one non-cancelled action that needs follow-up.
+      if (followUp !== undefined) {
+        if (followUp !== "true") return res.status(400).json(validationError("followUp", "must be 'true'."));
+        where.actionsTaken = { some: { followUpRequired: true, status: { not: "CANCELLED" } } };
       }
 
       if (itPriority !== undefined && itPriority !== "All") {
@@ -2188,6 +2199,7 @@ app.post(
 
 // Lab 4: Actions Taken and status history routes (src/lab4Routes.ts).
 registerLab4Routes(app, { parseStrictId, fetchAuthorizedTicketOr404 });
+registerDashboardRoutes(app);
 
 // Global Error Handler for Multer upload errors
 app.use(

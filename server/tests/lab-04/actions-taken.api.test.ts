@@ -3,8 +3,9 @@ import request from "supertest";
 import type { Agent as SuperTestAgent } from "supertest";
 import { app } from "../../src/app.js";
 import { getPrisma } from "../../src/prisma.js";
-import { loginAsRegressionStaff, loginAsRegressionAdmin, loginAsRegressionRequester, loginAsRegressionOtherRequester } from "../helpers/testAuth.js";
+import { loginAsRegressionStaff, loginAsRegressionRequester, loginAsRegressionOtherRequester } from "../helpers/testAuth.js";
 import { ensureLab4Users, loginAsSecondStaff, createTicket, createAction, validActionBody, type Lab4Users } from "../helpers/lab4.js";
+import { createLoggedInUser, withFreshAdmin } from "../helpers/lab4Dashboard.js";
 
 // API-01..API-17 (docs/lab-04/tests.md). API-18 (database constraints) lives in
 // actions-taken-constraints.api.test.ts.
@@ -21,7 +22,7 @@ describe("Actions Taken API (API-01..API-17)", () => {
     [staffA, staffB, admin, requester, otherRequester] = await Promise.all([
       loginAsRegressionStaff(),
       loginAsSecondStaff(),
-      loginAsRegressionAdmin(),
+      Promise.resolve(undefined as unknown as SuperTestAgent),
       loginAsRegressionRequester(),
       loginAsRegressionOtherRequester(),
     ]);
@@ -55,9 +56,9 @@ describe("Actions Taken API (API-01..API-17)", () => {
     const ticket = await createTicket({ requesterId: u.requesterId, ownerId: u.staffAId });
     const before = (await getPrisma().ticket.findUniqueOrThrow({ where: { id: ticket.id } })).updatedAt;
     await new Promise((r) => setTimeout(r, 15));
-    const res = await post(admin, ticket.id, validActionBody());
+    const { res, adminId } = await withFreshAdmin((a) => post(a, ticket.id, validActionBody()));
     expect(res.status).toBe(201);
-    expect(res.body.createdBy.id).toBe(u.adminId);
+    expect(res.body.createdBy.id).toBe(adminId);
     const after = (await getPrisma().ticket.findUniqueOrThrow({ where: { id: ticket.id } })).updatedAt;
     expect(after.getTime()).toBeGreaterThan(before.getTime());
   });
