@@ -41,6 +41,8 @@ const DEFAULT_PAGINATION: PaginationMeta = {
 interface MyTicketsProps {
   onSelectTicket?: (ticketId: number) => void;
   onNavigateToCreate?: () => void;
+  /** Lab 4: dashboard drill-down (e.g. /tickets?status=ACTIVE) opens the list pre-filtered. */
+  initialStatus?: string;
 }
 
 interface TicketsPage {
@@ -48,7 +50,7 @@ interface TicketsPage {
   pagination: PaginationMeta;
 }
 
-export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigateToCreate }) => {
+export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigateToCreate, initialStatus }) => {
   const { user } = useAuth();
 
   const categories = useCategoryOptions();
@@ -56,7 +58,7 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
   // Filter States
   const [search, setSearch] = useState<string>('');
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [status, setStatus] = useState<string>('All');
+  const [status, setStatus] = useState<string>(initialStatus ?? 'All');
   const [categoryId, setCategoryId] = useState<string>('All');
   const [priority, setPriority] = useState<string>('All');
   const [sort, setSort] = useState<string>('createdAt:desc');
@@ -190,6 +192,8 @@ export const MyTickets: React.FC<MyTicketsProps> = ({ onSelectTicket, onNavigate
                 }}
               >
                 <option value="All">All Statuses</option>
+                <option value="ACTIVE">Open (not resolved, closed or cancelled)</option>
+                <option value="WAITING_FOR_REQUESTER">Waiting for you</option>
                 <option value="New">New</option>
                 <option value="In Progress">In Progress</option>
                 <option value="Resolved">Resolved</option>

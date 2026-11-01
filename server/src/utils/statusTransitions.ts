@@ -1,5 +1,14 @@
 import { TicketStatus } from "@prisma/client";
 
+// Lab 4 (BR-29): "active" Tickets, used by the dashboards and the status=ACTIVE list filter.
+export const ACTIVE_TICKET_STATUSES: TicketStatus[] = [
+  TicketStatus.NEW,
+  TicketStatus.OPEN,
+  TicketStatus.IN_PROGRESS,
+  TicketStatus.WAITING_FOR_REQUESTER,
+  TicketStatus.REOPENED,
+];
+
 // BR-19, specification.md §6.5: the single source of truth for which
 // status transitions are legal. Exported as a plain data structure (not
 // buried inside the PATCH route handler) so:
@@ -57,10 +66,19 @@ export function isLegalTransition(from: TicketStatus, to: TicketStatus): boolean
 // ticket and then always get a 409 back from PATCH for that exact choice.
 // Both call sites now share this one helper instead of each re-deriving
 // "permitted transitions minus BR-17's IN_PROGRESS carve-out" independently.
-export function getPermittedTransitionsForTicket(status: TicketStatus, ownerId: number | null): TicketStatus[] {
-  const permitted = getPermittedTransitions(status);
+export function getPermittedTransitionsForTicket(
+  status: TicketStatus,
+  ownerId: number | null,
+  // Lab 4 (BR-19): RESOLVED is only offered once the resolution gate has no
+  // blockers. Optional so the Lab 3 two-argument callers keep their behaviour.
+  resolutionBlockers: readonly string[] = []
+): TicketStatus[] {
+  let permitted = getPermittedTransitions(status);
   if (ownerId === null) {
-    return permitted.filter((s) => s !== TicketStatus.IN_PROGRESS);
+    permitted = permitted.filter((s) => s !== TicketStatus.IN_PROGRESS);
+  }
+  if (resolutionBlockers.length > 0) {
+    permitted = permitted.filter((s) => s !== TicketStatus.RESOLVED);
   }
   return permitted;
 }

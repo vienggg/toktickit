@@ -9,7 +9,10 @@ import multer from "multer";
 import { getPrisma } from "./prisma.js";
 import { generateTicketNumber } from "./utils/ticketNumber.js";
 import { Prisma, TicketStatus, Priority, Role } from "@prisma/client";
-import { getPermittedTransitions, getPermittedTransitionsForTicket, isLegalTransition } from "./utils/statusTransitions.js";
+import { ACTIVE_TICKET_STATUSES, getPermittedTransitions, getPermittedTransitionsForTicket, isLegalTransition } from "./utils/statusTransitions.js";
+import { BLOCKER_MESSAGES, REASON_MAX, getResolutionBlockers, hasOpenActions } from "./utils/actionRules.js";
+import { registerLab4Routes } from "./lab4Routes.js";
+import { registerDashboardRoutes } from "./dashboardRoutes.js";
 import {
   requireAuth,
   requirePasswordChanged,
@@ -363,7 +366,9 @@ app.get("/api/tickets", requireAuth, requirePasswordChanged, async (req: Request
       requesterId: req.authUser!.id,
     };
 
-    if (status && status !== "All") {
+    if (status === "ACTIVE") {
+      where.status = { in: [...ACTIVE_TICKET_STATUSES] };
+    } else if (status && status !== "All") {
       const normalized = normalizeStatus(String(status));
       if (normalized) where.status = normalized;
     }
@@ -1157,15 +1162,23 @@ app.get(
   requireRole(Role.IT_STAFF, Role.ADMINISTRATOR),
   async (req: Request, res: Response) => {
     try {
-      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize } = req.query;
+      const { search, status, itPriority, categoryId, ownerId, sort, order, page, pageSize, followUp } = req.query;
 
       const where: Prisma.TicketWhereInput = {};
 
-      if (status !== undefined && status !== "All") {
+      if (status === "ACTIVE") {
+        where.status = { in: [...ACTIVE_TICKET_STATUSES] };
+      } else if (status !== undefined && status !== "All") {
         if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
-          return res.status(400).json(validationError("status", "must be a valid TicketStatus or 'All'."));
+          return res.status(400).json(validationError("status", "must be a valid TicketStatus, 'ACTIVE' or 'All'."));
         }
         where.status = status as TicketStatus;
+      }
+
+      // Lab 4 (BR-34): Tickets with at least one non-cancelled action that needs follow-up.
+      if (followUp !== undefined) {
+        if (followUp !== "true") return res.status(400).json(validationError("followUp", "must be 'true'."));
+        where.actionsTaken = { some: { followUpRequired: true, status: { not: "CANCELLED" } } };
       }
 
       if (itPriority !== undefined && itPriority !== "All") {
@@ -1345,6 +1358,8 @@ const STAFF_TICKET_DETAIL_INCLUDE = {
   requester: { select: SAFE_REQUESTER_SELECT },
   owner: { select: STAFF_OWNER_SELECT },
   attachments: { where: { isRemoved: false }, orderBy: { id: "asc" as const } },
+  // Lab 4: statuses only, used for actionsSummary and the resolution gate (BR-19).
+  actionsTaken: { select: { status: true } },
 } satisfies Prisma.TicketInclude;
 
 async function findStaffTicketOr404(res: Response, id: number) {
@@ -1362,6 +1377,9 @@ async function findStaffTicketOr404(res: Response, id: number) {
 type StaffTicket = NonNullable<Awaited<ReturnType<typeof findStaffTicketOr404>>>;
 
 function serializeStaffTicketDetail(ticket: StaffTicket) {
+  const actionStatuses = ticket.actionsTaken.map((a) => a.status);
+  const resolutionBlockers = getResolutionBlockers({ ownerId: ticket.ownerId, actionStatuses });
+  const countOf = (s: string) => actionStatuses.filter((x) => x === s).length;
   return {
     id: ticket.id,
     ticketNumber: ticket.ticketNumber,
@@ -1379,7 +1397,19 @@ function serializeStaffTicketDetail(ticket: StaffTicket) {
     // independent copy of the transition matrix, per the same
     // "server computes, client reads" fix PR #66 applied to
     // canSignalResolution above.
-    permittedStatusTransitions: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId),
+    permittedStatusTransitions: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId, resolutionBlockers),
+    // Lab 4 (api-spec §2): empty when Resolve is allowed.
+    resolutionBlockers,
+    actionsSummary: {
+      total: actionStatuses.length,
+      planned: countOf("PLANNED"),
+      inProgress: countOf("IN_PROGRESS"),
+      completed: countOf("COMPLETED"),
+      cancelled: countOf("CANCELLED"),
+    },
+    version: ticket.version,
+    resolvedAt: ticket.resolvedAt,
+    closedAt: ticket.closedAt,
     ownerId: ticket.ownerId,
     owner: ticket.owner,
     requesterId: ticket.requesterId,
@@ -1389,6 +1419,45 @@ function serializeStaffTicketDetail(ticket: StaffTicket) {
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
   };
+}
+
+// Lab 4 (BR-25): optional optimistic-concurrency guard shared by the owner and
+// IT priority routes. With expectedVersion the write is a single
+// UPDATE ... WHERE version = ?; a mismatch answers 409 STALE_UPDATE with the
+// current Ticket and changes nothing. Without it (Lab 3 callers) the write goes
+// through, last write wins, and the version still increases.
+function parseExpectedVersion(raw: unknown): { ok: true; value: number | undefined } | { ok: false } {
+  if (raw === undefined) return { ok: true, value: undefined };
+  return Number.isInteger(raw) && (raw as number) >= 1 ? { ok: true, value: raw as number } : { ok: false };
+}
+
+const EXPECTED_VERSION_ERROR = {
+  error: { code: "VALIDATION_ERROR", message: "Invalid 'expectedVersion': must be a positive integer.", field: "expectedVersion" },
+};
+
+async function updateTicketGuarded(
+  res: Response,
+  ticketId: number,
+  expectedVersion: number | undefined,
+  data: Prisma.TicketUpdateManyMutationInput & { ownerId?: number | null }
+) {
+  const prisma = getPrisma();
+  const result = await prisma.ticket.updateMany({
+    where: expectedVersion === undefined ? { id: ticketId } : { id: ticketId, version: expectedVersion },
+    data: { ...data, version: { increment: 1 } },
+  });
+  const current = await prisma.ticket.findUnique({ where: { id: ticketId }, include: STAFF_TICKET_DETAIL_INCLUDE });
+  if (!current) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Ticket not found." } });
+    return null;
+  }
+  if (result.count === 0) {
+    res.status(409).json({
+      error: { code: "STALE_UPDATE", message: "This ticket was changed by someone else. Reload the latest version.", current: serializeStaffTicketDetail(current) },
+    });
+    return null;
+  }
+  return current;
 }
 
 app.get(
@@ -1445,17 +1514,12 @@ app.patch(
         }
       }
 
-      // Item 4 in review of PR #68: pass STAFF_TICKET_DETAIL_INCLUDE
-      // directly to update() instead of a second findStaffTicketOr404
-      // call — one query instead of two, and no theoretical 404-on-a-
-      // successful-write race (an update() on an id just confirmed to
-      // exist can't itself return "not found" the way a second fetch
-      // could in principle race on).
-      const updated = await getPrisma().ticket.update({
-        where: { id: ticket.id },
-        data: { ownerId },
-        include: STAFF_TICKET_DETAIL_INCLUDE,
-      });
+      const expected = parseExpectedVersion((req.body ?? {}).expectedVersion);
+      if (!expected.ok) return res.status(400).json(EXPECTED_VERSION_ERROR);
+
+      // Lab 4 (BR-25): version-guarded write; see updateTicketGuarded.
+      const updated = await updateTicketGuarded(res, ticket.id, expected.value, { ownerId });
+      if (!updated) return;
 
       return res.status(200).json(serializeStaffTicketDetail(updated));
     } catch (err) {
@@ -1486,11 +1550,11 @@ app.patch(
         return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'itPriority' must be a valid Priority value." } });
       }
 
-      const updated = await getPrisma().ticket.update({
-        where: { id: ticket.id },
-        data: { itPriority: itPriority as Priority },
-        include: STAFF_TICKET_DETAIL_INCLUDE,
-      });
+      const expected = parseExpectedVersion((req.body ?? {}).expectedVersion);
+      if (!expected.ok) return res.status(400).json(EXPECTED_VERSION_ERROR);
+
+      const updated = await updateTicketGuarded(res, ticket.id, expected.value, { itPriority: itPriority as Priority });
+      if (!updated) return;
 
       return res.status(200).json(serializeStaffTicketDetail(updated));
     } catch (err) {
@@ -1517,41 +1581,129 @@ app.patch(
       const ticket = await findStaffTicketOr404(res, id);
       if (!ticket) return;
 
-      const { status } = req.body ?? {};
+      const { status, reason } = req.body ?? {};
       if (typeof status !== "string" || !(Object.values(TicketStatus) as string[]).includes(status)) {
         return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "'status' must be a valid TicketStatus value." } });
       }
       const targetStatus = status as TicketStatus;
-
-      if (!isLegalTransition(ticket.status, targetStatus)) {
-        return res.status(409).json({
-          error: { code: "ILLEGAL_TRANSITION", permitted: getPermittedTransitions(ticket.status) },
-        });
+      const expected = parseExpectedVersion((req.body ?? {}).expectedVersion);
+      if (!expected.ok) return res.status(400).json(EXPECTED_VERSION_ERROR);
+      if (reason !== undefined && reason !== null && typeof reason !== "string") {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid 'reason': must be a string.", field: "reason" } });
       }
-
-      // BR-17: a Ticket cannot enter IN_PROGRESS while unassigned, even
-      // though IN_PROGRESS may otherwise be a legal destination from the
-      // current status. Shared with GET's permittedStatusTransitions via
-      // getPermittedTransitionsForTicket (statusTransitions.ts) — fixed in
-      // review of PR #68 (item 1): this filter used to be duplicated here
-      // independently of GET's unfiltered getPermittedTransitions call.
-      if (targetStatus === TicketStatus.IN_PROGRESS && ticket.ownerId === null) {
-        return res.status(409).json({
-          error: {
-            code: "ILLEGAL_TRANSITION",
-            message: "A ticket cannot enter IN_PROGRESS while unassigned.",
-            permitted: getPermittedTransitionsForTicket(ticket.status, ticket.ownerId),
-          },
-        });
+      const reasonText = typeof reason === "string" ? reason.trim() : "";
+      if (reasonText.length > REASON_MAX) {
+        return res.status(400).json({ error: { code: "VALIDATION_ERROR", message: `Invalid 'reason': must be at most ${REASON_MAX} characters.`, field: "reason" } });
       }
+      const actorId = req.authUser!.id;
 
-      const updated = await getPrisma().ticket.update({
-        where: { id: ticket.id },
-        data: { status: targetStatus },
-        include: STAFF_TICKET_DETAIL_INCLUDE,
+      // Lab 4: the gate check, the status change and the history row run in ONE
+      // transaction holding the Ticket row lock, so a concurrent action create
+      // (which takes the same lock) can never slip past the resolution gate
+      // (BR-19) and two identical requests cannot both apply (WF-10).
+      type Outcome =
+        | { kind: "ok"; ticket: StaffTicket }
+        | { kind: "error"; httpStatus: number; body: object };
+      const outcome: Outcome = await getPrisma().$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Ticket" WHERE id = ${id} FOR UPDATE`;
+        const current = await tx.ticket.findUnique({ where: { id }, include: STAFF_TICKET_DETAIL_INCLUDE });
+        if (!current) return { kind: "error", httpStatus: 404, body: { error: { code: "NOT_FOUND", message: "Ticket not found." } } };
+
+        // BR-25: stale view of the Ticket.
+        if (expected.value !== undefined && current.version !== expected.value) {
+          return {
+            kind: "error",
+            httpStatus: 409,
+            body: {
+              error: {
+                code: "STALE_UPDATE",
+                message: "This ticket was changed by someone else. Reload the latest version.",
+                current: serializeStaffTicketDetail(current),
+              },
+            },
+          };
+        }
+
+        if (!isLegalTransition(current.status, targetStatus)) {
+          return { kind: "error", httpStatus: 409, body: { error: { code: "ILLEGAL_TRANSITION", permitted: getPermittedTransitions(current.status) } } };
+        }
+
+        // BR-18: a Ticket cannot enter IN_PROGRESS while unassigned, even
+        // though IN_PROGRESS may otherwise be a legal destination. Shared with
+        // GET's permittedStatusTransitions via getPermittedTransitionsForTicket.
+        if (targetStatus === TicketStatus.IN_PROGRESS && current.ownerId === null) {
+          return {
+            kind: "error",
+            httpStatus: 409,
+            body: {
+              error: {
+                code: "ILLEGAL_TRANSITION",
+                message: "A ticket cannot enter IN_PROGRESS while unassigned.",
+                permitted: getPermittedTransitionsForTicket(current.status, current.ownerId),
+              },
+            },
+          };
+        }
+
+        const actionStatuses = current.actionsTaken.map((a) => a.status);
+
+        // BR-19 resolution gate.
+        if (targetStatus === TicketStatus.RESOLVED) {
+          const blockers = getResolutionBlockers({ ownerId: current.ownerId, actionStatuses });
+          if (blockers.length > 0) {
+            return {
+              kind: "error",
+              httpStatus: 409,
+              body: {
+                error: {
+                  code: "RESOLUTION_BLOCKED",
+                  message: `This ticket cannot be resolved yet. ${blockers.map((b) => BLOCKER_MESSAGES[b]).join(" ")}`,
+                  blockers,
+                },
+              },
+            };
+          }
+        }
+
+        // BR-20 / BR-21: cancelling and reopening need a reason; cancelling also needs no open actions.
+        if ((targetStatus === TicketStatus.CANCELLED || targetStatus === TicketStatus.REOPENED) && reasonText.length === 0) {
+          return {
+            kind: "error",
+            httpStatus: 400,
+            body: { error: { code: "VALIDATION_ERROR", message: "Invalid 'reason': a reason is required for this change.", field: "reason" } },
+          };
+        }
+        if (targetStatus === TicketStatus.CANCELLED && hasOpenActions(actionStatuses)) {
+          return {
+            kind: "error",
+            httpStatus: 409,
+            body: {
+              error: {
+                code: "OPEN_ACTIONS_BLOCK_CANCEL",
+                message: `This ticket cannot be cancelled yet. ${BLOCKER_MESSAGES.OPEN_ACTIONS}`,
+                blockers: ["OPEN_ACTIONS"],
+              },
+            },
+          };
+        }
+
+        const now = new Date();
+        const data: Prisma.TicketUpdateInput = { status: targetStatus, version: { increment: 1 } };
+        if (targetStatus === TicketStatus.RESOLVED) data.resolvedAt = now;
+        if (targetStatus === TicketStatus.CLOSED) data.closedAt = now;
+        if (targetStatus === TicketStatus.REOPENED) {
+          data.resolvedAt = null;
+          data.closedAt = null;
+        }
+        const updatedTicket = await tx.ticket.update({ where: { id }, data, include: STAFF_TICKET_DETAIL_INCLUDE });
+        await tx.ticketStatusHistory.create({
+          data: { ticketId: id, fromStatus: current.status, toStatus: targetStatus, changedById: actorId, reason: reasonText.length > 0 ? reasonText : null },
+        });
+        return { kind: "ok", ticket: updatedTicket };
       });
 
-      return res.status(200).json(serializeStaffTicketDetail(updated));
+      if (outcome.kind === "error") return res.status(outcome.httpStatus).json(outcome.body);
+      return res.status(200).json(serializeStaffTicketDetail(outcome.ticket));
     } catch (err) {
       console.error("Set ticket status error:", err);
       return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to update ticket status." } });
@@ -2044,6 +2196,10 @@ app.post(
     }
   }
 );
+
+// Lab 4: Actions Taken and status history routes (src/lab4Routes.ts).
+registerLab4Routes(app, { parseStrictId, fetchAuthorizedTicketOr404 });
+registerDashboardRoutes(app);
 
 // Global Error Handler for Multer upload errors
 app.use(

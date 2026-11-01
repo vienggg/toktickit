@@ -186,3 +186,44 @@ body {
   border-color: var(--zen-primary);
   box-shadow: 0 0 0 0.25rem var(--zen-focus-ring);
 }
+
+/* Lab 4 (ui-spec §1): Actions Taken status badges and follow-up chip. Every badge also carries text and a symbol, never colour alone. */
+:root {
+  --color-action-planned-bg: #F1F5F9;
+  --color-action-planned-text: #475569;
+  --color-action-progress-bg: #DBEAFE;
+  --color-action-progress-text: #1D4ED8;
+  --color-action-completed-bg: #D1FAE5;
+  --color-action-completed-text: #047857;
+  --color-action-cancelled-bg: #FEE2E2;
+  --color-action-cancelled-text: #991B1B;
+  --color-followup-bg: #FEF3C7;
+  --color-followup-text: #B45309;
+}
+.zen-badge-action-planned { background-color: var(--color-action-planned-bg); color: var(--color-action-planned-text); }
+.zen-badge-action-in-progress { background-color: var(--color-action-progress-bg); color: var(--color-action-progress-text); }
+.zen-badge-action-completed { background-color: var(--color-action-completed-bg); color: var(--color-action-completed-text); }
+.zen-badge-action-cancelled { background-color: var(--color-action-cancelled-bg); color: var(--color-action-cancelled-text); }
+.zen-chip-followup { background-color: var(--color-followup-bg); color: var(--color-followup-text); }
+
+/* Lab 4 dashboards (ui-spec §3): attention text, metric card focus/hover. Text carries the meaning; colour only emphasises it. */
+.zen-attention-text { color: var(--color-followup-text); }
+.metric-card { border-color: var(--zen-border) !important; color: inherit; }
+.metric-card:hover { border-color: var(--zen-primary) !important; }
+.metric-card:focus-visible { outline: 3px solid var(--zen-focus-ring); outline-offset: 2px; border-color: var(--zen-primary) !important; }
+
+/* Lab 4 hardening (ui-spec V-13): touch targets are at least 44 px on phones. */
+@media (max-width: 575.98px) {
+  .btn,
+  .form-select,
+  .form-control:not(textarea),
+  .navbar .nav-link { min-height: 44px; min-width: 44px; }
+  .form-check { display: flex; align-items: center; gap: 0.5rem; min-height: 44px; padding-left: 0; }
+  .form-check .form-check-input { float: none; margin: 0; width: 1.5rem; height: 1.5rem; }
+  .form-check .form-check-label { flex: 1; display: flex; align-items: center; min-height: 44px; }
+}
+
+/* Lab 4 hardening (ui-spec V-14): no motion for people who ask for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

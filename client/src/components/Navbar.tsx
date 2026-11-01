@@ -8,7 +8,9 @@ interface NavbarProps {
   setCurrentView?: (view: 'create' | 'list' | 'detail') => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) => {
+// currentView/setCurrentView are kept as optional, ignored props so older callers
+// and tests still compile; navigation is URL-based since Lab 4.
+export const Navbar: React.FC<NavbarProps> = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -22,6 +24,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   const isStaff = user?.role === 'IT_STAFF';
   const isAdministrator = user?.role === 'ADMINISTRATOR';
   const onStaffRoute = location.pathname.startsWith('/staff/');
+  const path = location.pathname;
+  const onDashboard = path === '/dashboard';
+  const onCreate = path === '/tickets/new';
+  const onList = path.startsWith('/tickets') && !onCreate; // ticket detail keeps "My Tickets" active
 
   return (
     <nav aria-label="Main navigation" className="navbar navbar-dark shadow-sm" style={{ backgroundColor: 'var(--zen-primary)' }}>
@@ -29,11 +35,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         <div className="d-flex w-100 flex-wrap align-items-center gap-2">
           <a
             className="navbar-brand d-flex align-items-center gap-2 fw-bold text-white fs-5 mb-0"
-            href="/"
+            href="/dashboard"
             onClick={(event) => {
               event.preventDefault();
-              if (isRequester) setCurrentView?.('create');
-              else navigate('/');
+              navigate('/dashboard');
             }}
           >
             <span
@@ -79,14 +84,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           </div>
 
           <div className="d-flex w-100 align-items-center gap-2 flex-wrap">
+            {/* Lab 4 (ui-spec §2): every role gets a Dashboard link; the current page carries aria-current. */}
+            <button
+              type="button"
+              className={`btn btn-sm text-white ${onDashboard ? 'bg-white bg-opacity-25 fw-bold shadow-sm' : 'text-white-50 border-0'}`}
+              onClick={() => navigate('/dashboard')}
+              aria-current={onDashboard ? 'page' : undefined}
+              style={{ borderRadius: '0.5rem' }}
+            >
+              🏠 Dashboard
+            </button>
             {isRequester && (
               <div className="d-flex align-items-center gap-2">
                 <button
                   type="button"
                   className={`btn btn-sm text-white ${
-                    currentView === 'create' ? 'bg-white bg-opacity-25 fw-bold shadow-sm' : 'text-white-50 border-0'
+                    onCreate ? 'bg-white bg-opacity-25 fw-bold shadow-sm' : 'text-white-50 border-0'
                   }`}
-                  onClick={() => setCurrentView?.('create')}
+                  onClick={() => navigate('/tickets/new')}
+                  aria-current={onCreate ? 'page' : undefined}
                   style={{ borderRadius: '0.5rem' }}
                 >
                   ➕ Create Ticket
@@ -94,9 +110,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <button
                   type="button"
                   className={`btn btn-sm text-white ${
-                    currentView === 'list' ? 'bg-white bg-opacity-25 fw-bold shadow-sm' : 'text-white-50 border-0'
+                    onList ? 'bg-white bg-opacity-25 fw-bold shadow-sm' : 'text-white-50 border-0'
                   }`}
-                  onClick={() => setCurrentView?.('list')}
+                  onClick={() => navigate('/tickets')}
+                  aria-current={onList ? 'page' : undefined}
                   style={{ borderRadius: '0.5rem' }}
                 >
                   📋 My Tickets

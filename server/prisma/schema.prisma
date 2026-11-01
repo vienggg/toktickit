@@ -45,6 +45,12 @@ model User {
   publicComments   PublicComment[]
   internalNotes    InternalNote[]
 
+  // Lab 4: Actions Taken and status history relations.
+  actionsCreated  ActionTaken[]         @relation("ActionCreatedBy")
+  actionsAssigned ActionTaken[]         @relation("ActionAssignee")
+  actionsUpdated  ActionTaken[]         @relation("ActionUpdatedBy")
+  statusChanges   TicketStatusHistory[]
+
   @@index([role])
   @@index([isActive])
   @@map("RequesterUser")
@@ -60,10 +66,10 @@ model RelatedSystem {
 }
 
 model Ticket {
-  id                 Int          @id @default(autoincrement())
-  ticketNumber       String       @unique
-  summary            String
-  description        String
+  id                  Int          @id @default(autoincrement())
+  ticketNumber        String       @unique
+  summary             String
+  description         String
   requestedPriority   Priority     @default(MEDIUM) @map("priority")
   itPriority          Priority     @default(MEDIUM)
   status              TicketStatus @default(NEW)
@@ -72,16 +78,22 @@ model Ticket {
   requesterId         Int
   ownerId             Int?
   requesterResolvedAt DateTime?
+  // Lab 4: optimistic-concurrency counter (BR-25) and lifecycle stamps (BR-22).
+  version             Int          @default(1)
+  resolvedAt          DateTime?
+  closedAt            DateTime?
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
-  category       Category        @relation(fields: [categoryId], references: [id])
-  relatedSystem  RelatedSystem?  @relation(fields: [relatedSystemId], references: [id])
-  requester      User            @relation("TicketRequester", fields: [requesterId], references: [id])
-  owner          User?           @relation("TicketOwner", fields: [ownerId], references: [id])
+  category       Category              @relation(fields: [categoryId], references: [id])
+  relatedSystem  RelatedSystem?        @relation(fields: [relatedSystemId], references: [id])
+  requester      User                  @relation("TicketRequester", fields: [requesterId], references: [id])
+  owner          User?                 @relation("TicketOwner", fields: [ownerId], references: [id])
   attachments    Attachment[]
   publicComments PublicComment[]
   internalNotes  InternalNote[]
+  actionsTaken   ActionTaken[]
+  statusHistory  TicketStatusHistory[]
 
   @@index([requesterId])
   @@index([status])
@@ -90,6 +102,7 @@ model Ticket {
   @@index([ownerId])
   @@index([itPriority])
   @@index([updatedAt])
+  @@index([ownerId, status])
 }
 
 // ---------------------------------------------------------------------------
@@ -163,4 +176,64 @@ model Attachment {
   uploadedAt    DateTime  @default(now())
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Lab 4 — Actions Taken and Ticket status history
+// ---------------------------------------------------------------------------
+enum ActionStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// Work recorded under a Ticket (BR-01). Never deleted (BR-13): the FK is
+// RESTRICT, not CASCADE, so deleting a Ticket with recorded work fails loudly.
+// Two CHECK constraints live in the migration SQL (Prisma cannot express them):
+//   followUpRequired => followUpNote is non-blank   (BR-09)
+//   status = COMPLETED => result is non-blank       (BR-08)
+model ActionTaken {
+  id               Int          @id @default(autoincrement())
+  ticketId         Int
+  actionAt         DateTime
+  description      String
+  result           String?
+  status           ActionStatus @default(PLANNED)
+  followUpRequired Boolean      @default(false)
+  followUpNote     String?
+  attachmentNotes  String?
+  createdById      Int
+  assigneeId       Int
+  updatedById      Int?
+  clientRequestId  String?
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  completedAt      DateTime?
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  createdBy User   @relation("ActionCreatedBy", fields: [createdById], references: [id])
+  assignee  User   @relation("ActionAssignee", fields: [assigneeId], references: [id])
+  updatedBy User?  @relation("ActionUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([ticketId, clientRequestId])
+  @@index([ticketId, actionAt, id])
+  @@index([assigneeId, status])
+}
+
+// Append-only audit trail of status changes (BR-24). No update/delete path.
+model TicketStatusHistory {
+  id          Int          @id @default(autoincrement())
+  ticketId    Int
+  fromStatus  TicketStatus
+  toStatus    TicketStatus
+  changedById Int
+  reason      String?
+  createdAt   DateTime     @default(now())
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  changedBy User   @relation(fields: [changedById], references: [id])
+
+  @@index([ticketId, createdAt, id])
 }

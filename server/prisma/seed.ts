@@ -62,6 +62,8 @@ async function main() {
     { name: 'Emily Davis', email: 'emily.davis@toktick.internal', department: 'Marketing', isActive: true },
     { name: 'David Wilson', email: 'david.wilson@toktick.internal', department: 'Engineering', isActive: true },
     { name: 'Alex Taylor', email: 'alex.taylor@toktick.internal', department: 'Human Resources', isActive: false },
+    // Lab 4: an active Requester with no Tickets, to demonstrate an all-zero Requester dashboard.
+    { name: 'Nok Chaiyo', email: 'nok.chaiyo@toktick.internal', department: 'Legal', isActive: true },
   ];
 
   const staffData = [
@@ -69,6 +71,8 @@ async function main() {
     { name: 'Carlos Mendez', email: 'carlos.mendez@toktick.internal', department: 'IT Support', isActive: true },
     { name: 'Sofia Rossi', email: 'sofia.rossi@toktick.internal', department: 'IT Support', isActive: true },
     { name: 'Tom Becker', email: 'tom.becker@toktick.internal', department: 'IT Support', isActive: false },
+    // Lab 4: an active IT Staff member with no owned Tickets or actions, to demonstrate an all-zero staff dashboard.
+    { name: 'Mali Wong', email: 'mali.wong@toktick.internal', department: 'IT Support', isActive: true },
   ];
 
   const adminData = [
@@ -237,6 +241,83 @@ async function main() {
   for (const num of ['TKT-2026-000301', 'TKT-2026-000303', 'TKT-2026-000304', 'TKT-2026-000309']) {
     await ensureCommentary(num);
   }
+
+  // ---------------------------------------------------------------------
+  // Lab 4: Actions Taken and status history demo data (spec §7 "Seed data").
+  // Idempotent: actions are upserted by (ticketId, clientRequestId) with the
+  // "seed-lab4-" prefix; history rows are only added to a Ticket that has none.
+  // Shapes: 0 actions (TKT-...307 and every legacy Ticket), 1 action (...303,
+  // ...305), several (...301 with two different staff, neither the owner),
+  // every ActionStatus, and a pending follow-up.
+  // ---------------------------------------------------------------------
+  type SeedAction = {
+    key: string;
+    createdBy: number;
+    assignee: number;
+    status: 'PLANNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+    description: string;
+    result?: string;
+    followUpNote?: string;
+    attachmentNotes?: string;
+  };
+  async function ensureActions(ticketNumber: string, actions: SeedAction[]) {
+    const ticket = await prisma.ticket.findUnique({ where: { ticketNumber } });
+    if (!ticket) return;
+    for (const [index, a] of actions.entries()) {
+      const actionAt = new Date(ticket.createdAt.getTime() + (index + 1) * 60_000);
+      await prisma.actionTaken.upsert({
+        where: { ticketId_clientRequestId: { ticketId: ticket.id, clientRequestId: `seed-lab4-${a.key}` } },
+        update: {},
+        create: {
+          ticketId: ticket.id,
+          clientRequestId: `seed-lab4-${a.key}`,
+          actionAt,
+          description: a.description,
+          result: a.result ?? null,
+          status: a.status,
+          followUpRequired: a.followUpNote !== undefined,
+          followUpNote: a.followUpNote ?? null,
+          attachmentNotes: a.attachmentNotes ?? null,
+          createdById: a.createdBy,
+          assigneeId: a.assignee,
+          completedAt: a.status === 'COMPLETED' ? actionAt : null,
+        },
+      });
+    }
+  }
+  async function ensureHistory(ticketNumber: string, changedById: number, steps: Array<[TicketStatus, TicketStatus, string?]>) {
+    const ticket = await prisma.ticket.findUnique({ where: { ticketNumber } });
+    if (!ticket) return;
+    if ((await prisma.ticketStatusHistory.count({ where: { ticketId: ticket.id } })) > 0) return;
+    for (const [index, [fromStatus, toStatus, reason]] of steps.entries()) {
+      await prisma.ticketStatusHistory.create({
+        data: { ticketId: ticket.id, fromStatus, toStatus, changedById, reason: reason ?? null, createdAt: new Date(ticket.createdAt.getTime() + (index + 1) * 60_000) },
+      });
+    }
+  }
+
+  await ensureActions('TKT-2026-000301', [
+    { key: '301-a', createdBy: carlos.id, assignee: carlos.id, status: 'COMPLETED', description: 'Checked the CRM import log and identified 40 duplicate lead records.', result: 'Duplicates confirmed; the list was exported for review.', attachmentNotes: 'Export file is in the IT shared folder under CRM/Dedup.' },
+    { key: '301-b', createdBy: sofia.id, assignee: sofia.id, status: 'IN_PROGRESS', description: 'Running the dedup script against a staging copy of the lead table.' },
+    { key: '301-c', createdBy: carlos.id, assignee: priya.id, status: 'PLANNED', description: 'Schedule the production dedup once the staging run is verified.', followUpNote: 'Re-check lead counts after the next scheduled import.' },
+  ]);
+  await ensureActions('TKT-2026-000303', [
+    { key: '303-a', createdBy: carlos.id, assignee: carlos.id, status: 'COMPLETED', description: 'Prepared the BIOS update package and sent installation steps to the requester.', result: 'Requester asked to install the update and confirm that the docking station works.' },
+  ]);
+  await ensureActions('TKT-2026-000304', [
+    { key: '304-a', createdBy: priya.id, assignee: priya.id, status: 'IN_PROGRESS', description: 'Regenerating the VPN client certificate for the remote engineering pool.' },
+    { key: '304-b', createdBy: sofia.id, assignee: sofia.id, status: 'CANCELLED', description: 'Push the new certificate through device management (cancelled: policy change pending).' },
+  ]);
+  await ensureActions('TKT-2026-000305', [
+    { key: '305-a', createdBy: priya.id, assignee: priya.id, status: 'COMPLETED', description: 'Restarted the dispatcher refresh service and verified live updates.', result: 'Queue refreshed automatically for 30 minutes during observation.' },
+  ]);
+
+  await ensureHistory('TKT-2026-000301', priya.id, [[TicketStatus.NEW, TicketStatus.OPEN]]);
+  await ensureHistory('TKT-2026-000305', priya.id, [
+    [TicketStatus.NEW, TicketStatus.OPEN],
+    [TicketStatus.OPEN, TicketStatus.RESOLVED],
+    [TicketStatus.RESOLVED, TicketStatus.REOPENED, 'Requester reported the issue returned.'],
+  ]);
 
   const finalCounts = {
     users: await prisma.user.count(),

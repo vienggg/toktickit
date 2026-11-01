@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { apiFetch, parseApiError } from '../api';
 import { PublicCommentsPanel, PublicCommentData } from './PublicCommentsPanel';
+import { ActionsTaken } from './ActionsTaken';
+import { StatusHistory } from './StatusHistory';
 import { TicketStatusBadge } from './TicketStatusBadge';
 
 interface Attachment {
@@ -797,6 +799,11 @@ export const TicketDetail: React.FC<TicketDetailProps> = ({ ticketId, onBack }) 
               </div>
             )}
           </div>
+
+          {/* Lab 4 (I-4): read-only Actions Taken and status history. A Requester
+              can see every action on their own ticket but never create or change one. */}
+          <ActionsTaken ticketId={ticketId} ticketStatus={ticket.status} mode="requester" />
+          <StatusHistory ticketId={ticketId} showReasons={false} />
 
           {/* PUBLIC COMMENTS (I-5) — visible to Requester, IT Staff, and
               Administrator (BR-04); background matches the page canvas
